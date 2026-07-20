@@ -9,7 +9,7 @@ import {
 import axios from "axios";
 import "./App.css";
 
-const API_URL = "http://localhost:5000/approvals";
+const API_URL = "https://sse-sales-check.onrender.com/approvals";
 const POLL_INTERVAL_MS = 3000;
 
 const PACKAGING_STORAGE_KEY = "packaging-status";
