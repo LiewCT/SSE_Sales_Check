@@ -4,16 +4,30 @@
 
 body {
   margin: 0;
+
   background: #f3f4f6;
   color: #222222;
-  font-family: Arial, sans-serif;
+
+  font-family:
+    Arial,
+    sans-serif;
 }
 
 .page {
   width: 100%;
   max-width: 1600px;
+
   margin: 0 auto;
-  padding: 22px;
+
+  /*
+    Extra bottom space prevents the
+    fixed Send Now card from covering
+    the normal cards.
+  */
+  padding:
+    22px
+    22px
+    350px;
 }
 
 
@@ -30,6 +44,7 @@ body {
 
 h2 {
   margin: 0;
+
   font-size: 32px;
 }
 
@@ -43,13 +58,27 @@ h2 {
 }
 
 
+/* HEADER ACTIONS */
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+
+  gap: 12px;
+}
+
+
 /* LIVE STATUS */
 
 .live-panel {
   min-width: 170px;
   padding: 10px 14px;
 
-  border: 1px solid #dddddd;
+  border:
+    1px solid
+    #dddddd;
+
   border-radius: 10px;
 
   background: #ffffff;
@@ -122,7 +151,10 @@ h2 {
   display: grid;
 
   grid-template-columns:
-    repeat(2, minmax(0, 1fr));
+    repeat(
+      2,
+      minmax(0, 1fr)
+    );
 
   align-items: start;
 
@@ -138,7 +170,10 @@ h2 {
   min-width: 0;
   overflow: hidden;
 
-  border: 2px solid #dddddd;
+  border:
+    2px solid
+    #dddddd;
+
   border-radius: 14px;
 
   background: #ffffff;
@@ -155,7 +190,8 @@ h2 {
 }
 
 .order-card.drag-over {
-  transform: scale(1.015);
+  transform:
+    scale(1.015);
 
   outline:
     4px dashed
@@ -170,12 +206,14 @@ h2 {
 
 .order-card.drop-blocked {
   cursor: not-allowed;
+
   opacity: 0.75;
 }
 
 .order-card.drop-blocked::after {
   position: absolute;
   inset: 0;
+
   z-index: 20;
 
   content: "";
@@ -217,7 +255,12 @@ h2 {
   border-radius: 50px;
 
   background:
-    rgba(255, 255, 255, 0.3);
+    rgba(
+      255,
+      255,
+      255,
+      0.3
+    );
 
   font-size: 17px;
   font-weight: bold;
@@ -228,12 +271,14 @@ h2 {
 
 .drop-warning {
   position: relative;
+
   z-index: 21;
 
   padding: 10px 15px;
 
   border-bottom:
-    2px solid #b91c1c;
+    2px solid
+    #b91c1c;
 
   background: #fff1f1;
   color: #8b0000;
@@ -412,6 +457,7 @@ thead > tr > th:nth-child(3) {
 
 .order-row {
   cursor: grab;
+
   outline: none;
 
   transition:
@@ -451,12 +497,14 @@ thead > tr > th:nth-child(3) {
 }
 
 .order-row:hover > td {
-  filter: brightness(0.96);
+  filter:
+    brightness(0.96);
 }
 
 .order-row:focus-visible > td {
   outline:
-    3px solid #111111;
+    3px solid
+    #111111;
 
   outline-offset: -3px;
 }
@@ -504,6 +552,7 @@ td:last-child {
 
 .order-row.is-new > td {
   position: relative;
+
   z-index: 1;
 
   animation:
@@ -513,25 +562,42 @@ td:last-child {
 
 @keyframes newOrderShine {
   from {
-    filter: brightness(1);
+    filter:
+      brightness(1);
 
     box-shadow:
       inset 0 0 0 2px
-      rgba(255, 255, 255, 0.7),
+      rgba(
+        255,
+        255,
+        255,
+        0.7
+      ),
 
       0 0 5px
-      rgba(255, 193, 7, 0.7);
+      rgba(
+        255,
+        193,
+        7,
+        0.7
+      );
   }
 
   to {
-    filter: brightness(1.12);
+    filter:
+      brightness(1.12);
 
     box-shadow:
       inset 0 0 0 3px
       #ffffff,
 
       0 0 17px
-      rgba(255, 193, 7, 1);
+      rgba(
+        255,
+        193,
+        7,
+        1
+      );
   }
 }
 
@@ -565,7 +631,12 @@ td:last-child {
 
   box-shadow:
     0 0 8px
-    rgba(255, 240, 0, 0.9);
+    rgba(
+      255,
+      240,
+      0,
+      0.9
+    );
 }
 
 .order-date {
@@ -685,19 +756,31 @@ td:last-child {
 
 @keyframes changeStatusPulse {
   from {
-    filter: brightness(1);
+    filter:
+      brightness(1);
 
     box-shadow:
       0 0 3px
-      rgba(255, 255, 255, 0.5);
+      rgba(
+        255,
+        255,
+        255,
+        0.5
+      );
   }
 
   to {
-    filter: brightness(1.14);
+    filter:
+      brightness(1.14);
 
     box-shadow:
       0 0 12px
-      rgba(255, 255, 255, 0.9);
+      rgba(
+        255,
+        255,
+        255,
+        0.9
+      );
   }
 }
 
@@ -705,7 +788,8 @@ td:last-child {
 /* EXPANDED CHILD */
 
 .detail > td {
-  padding: 0 10px 11px;
+  padding:
+    0 10px 11px;
 
   border-right:
     1px solid
@@ -725,6 +809,7 @@ td:last-child {
 
 .item-container {
   width: 100%;
+
   overflow-x: auto;
 
   border:
@@ -734,7 +819,12 @@ td:last-child {
   border-radius: 8px;
 
   background:
-    rgba(255, 255, 255, 0.64);
+    rgba(
+      255,
+      255,
+      255,
+      0.64
+    );
 }
 
 .item-table {
@@ -750,7 +840,12 @@ td:last-child {
   padding: 10px;
 
   background:
-    rgba(255, 255, 255, 0.78);
+    rgba(
+      255,
+      255,
+      255,
+      0.78
+    );
 
   color: #333333;
 
@@ -897,6 +992,265 @@ td:last-child {
 }
 
 
+/* INSTALL PWA BUTTON */
+
+.install-app-button {
+  min-height: 44px;
+  padding: 10px 18px;
+
+  border: none;
+  border-radius: 10px;
+
+  background: #1565c0;
+  color: #ffffff;
+
+  font-size: 15px;
+  font-weight: bold;
+
+  cursor: pointer;
+
+  box-shadow:
+    0 3px 9px
+    rgba(
+      21,
+      101,
+      192,
+      0.3
+    );
+
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.install-app-button:hover:not(
+  :disabled
+) {
+  background: #0d47a1;
+
+  transform:
+    translateY(-1px);
+
+  box-shadow:
+    0 5px 13px
+    rgba(
+      21,
+      101,
+      192,
+      0.38
+    );
+}
+
+.install-app-button:active:not(
+  :disabled
+) {
+  transform:
+    translateY(0);
+}
+
+.install-app-button.unavailable {
+  background: #9ca3af;
+  color: #ffffff;
+
+  cursor: not-allowed;
+
+  box-shadow: none;
+  opacity: 0.8;
+}
+
+.pwa-installed {
+  padding: 10px 15px;
+
+  border:
+    1px solid
+    #86c995;
+
+  border-radius: 10px;
+
+  background: #d8f3df;
+  color: #155724;
+
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.pwa-unavailable {
+  padding: 10px 15px;
+
+  border:
+    1px solid
+    #e59b9b;
+
+  border-radius: 10px;
+
+  background: #ffe2e2;
+  color: #8b0000;
+
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.pwa-ios-message {
+  max-width: 190px;
+  padding: 9px 13px;
+
+  border:
+    1px solid
+    #9fbfe8;
+
+  border-radius: 10px;
+
+  background: #eaf4ff;
+  color: #174b85;
+
+  font-size: 13px;
+  font-weight: bold;
+
+  text-align: center;
+}
+
+
+/* FIXED SEND NOW DOCK */
+
+.fixed-send-now-dock {
+  position: fixed;
+
+  left: 50%;
+
+  bottom:
+    calc(
+      14px +
+      env(
+        safe-area-inset-bottom
+      )
+    );
+
+  z-index: 1000;
+
+  width:
+    min(
+      1100px,
+      calc(100vw - 32px)
+    );
+
+  max-height: 42vh;
+
+  transform:
+    translateX(-50%);
+
+  border-radius: 14px;
+
+  transition:
+    transform 0.2s ease,
+    filter 0.2s ease;
+}
+
+.fixed-send-now-dock
+.order-card.send_now {
+  width: 100%;
+  max-height: 42vh;
+
+  margin: 0;
+
+  border-width: 3px;
+
+  box-shadow:
+    0 -4px 20px
+    rgba(0, 0, 0, 0.25);
+}
+
+.fixed-send-now-dock
+.card-heading {
+  min-height: 64px;
+
+  padding: 10px 17px;
+}
+
+.fixed-send-now-dock
+.section-title {
+  font-size: 23px;
+}
+
+.fixed-send-now-dock
+.table-wrapper {
+  min-height: 90px;
+
+  max-height:
+    calc(
+      42vh - 64px
+    );
+
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+/*
+  Keep the Send Now table header
+  visible while its rows scroll.
+*/
+.fixed-send-now-dock
+.main-table > thead > tr > th {
+  position: sticky;
+
+  top: 0;
+
+  z-index: 15;
+}
+
+
+/* SEND NOW DURING DRAG */
+
+.fixed-send-now-dock.drag-active {
+  transform:
+    translateX(-50%)
+    translateY(-5px);
+
+  filter:
+    drop-shadow(
+      0 0 12px
+      rgba(
+        198,
+        40,
+        40,
+        0.55
+      )
+    );
+}
+
+.fixed-send-now-dock.drag-active
+.order-card.send_now {
+  border-color: #ff3131;
+}
+
+.fixed-send-now-dock
+.order-card.send_now.drag-over {
+  transform:
+    scale(1.01);
+
+  outline:
+    5px dashed
+    rgba(
+      255,
+      255,
+      255,
+      0.95
+    );
+
+  outline-offset: -10px;
+
+  box-shadow:
+    0 0 28px
+    rgba(
+      198,
+      40,
+      40,
+      0.75
+    );
+}
+
+
 /* TABLET */
 
 @media (max-width: 1100px) {
@@ -910,11 +1264,21 @@ td:last-child {
 
 @media (max-width: 650px) {
   .page {
-    padding: 10px;
+    padding:
+      10px
+      10px
+      270px;
   }
 
   .page-header {
     align-items: flex-start;
+  }
+
+  .header-actions {
+    flex-direction: column;
+    align-items: flex-end;
+
+    gap: 8px;
   }
 
   h2 {
@@ -927,11 +1291,28 @@ td:last-child {
 
   .live-panel {
     min-width: 125px;
+
     padding: 8px 10px;
   }
 
   .last-updated {
     display: none;
+  }
+
+  .install-app-button {
+    min-height: 38px;
+
+    padding: 8px 12px;
+
+    font-size: 12px;
+  }
+
+  .pwa-installed,
+  .pwa-unavailable,
+  .pwa-ios-message {
+    padding: 7px 10px;
+
+    font-size: 11px;
   }
 
   .card-grid {
@@ -940,6 +1321,7 @@ td:last-child {
 
   .card-heading {
     min-height: 70px;
+
     padding: 11px 14px;
   }
 
@@ -949,17 +1331,20 @@ td:last-child {
 
   .drop-warning {
     padding: 8px 10px;
+
     font-size: 12px;
   }
 
   .main-table >
   thead > tr > th {
     padding: 9px 7px;
+
     font-size: 12px;
   }
 
   .order-row > td {
     padding: 11px 7px;
+
     font-size: 13px;
   }
 
@@ -970,10 +1355,62 @@ td:last-child {
 
   .pack-status {
     padding: 5px 7px;
+
     font-size: 10px;
   }
 
   .item-table {
     min-width: 620px;
+  }
+
+
+  /* MOBILE FIXED SEND NOW */
+
+  .fixed-send-now-dock {
+    bottom:
+      calc(
+        8px +
+        env(
+          safe-area-inset-bottom
+        )
+      );
+
+    width:
+      calc(100vw - 16px);
+
+    max-height: 38vh;
+  }
+
+  .fixed-send-now-dock
+  .order-card.send_now {
+    max-height: 38vh;
+  }
+
+  .fixed-send-now-dock
+  .card-heading {
+    min-height: 54px;
+
+    padding: 8px 12px;
+  }
+
+  .fixed-send-now-dock
+  .section-title {
+    font-size: 19px;
+  }
+
+  .fixed-send-now-dock
+  .order-count {
+    min-width: 34px;
+    height: 34px;
+
+    font-size: 14px;
+  }
+
+  .fixed-send-now-dock
+  .table-wrapper {
+    max-height:
+      calc(
+        38vh - 54px
+      );
   }
 }

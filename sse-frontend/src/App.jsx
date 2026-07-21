@@ -8,13 +8,24 @@ import {
 } from "react";
 import axios from "axios";
 import "./App.css";
+import PwaInstallButton from "./PwaInstallButton";
 
-const API_URL = "https://sse-sales-check.onrender.com/approvals";
+const API_BASE_URL =
+  "https://sse-sales-check.onrender.com";
+
+const APPROVALS_API_URL =
+  `${API_BASE_URL}/approvals`;
+
+const PACKAGING_STATUS_API_URL =
+  `${API_BASE_URL}/packaging-status`;
+
 const POLL_INTERVAL_MS = 3000;
 
-const PACKAGING_STORAGE_KEY = "packaging-status";
-const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
-const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
+const ORDER_TYPE_STORAGE_KEY =
+  "order-type-overrides";
+
+const SEEN_ORDERS_STORAGE_KEY =
+  "seen-order-ids";
 
 const SERVER_SNAPSHOT_STORAGE_KEY =
   "packaging-server-snapshot";
@@ -23,10 +34,11 @@ const ORDER_CHANGES_STORAGE_KEY =
   "packaging-order-changes";
 
 /*
-  Fixed card placement:
+  Normal grid:
+  New, Trip, Hold
 
-  New       Trip
-  Send Now  Hold
+  Fixed at bottom:
+  Send Now
 */
 const ORDER_SECTIONS = [
   {
@@ -180,8 +192,8 @@ const detectOrderChanges = (
         previousSnapshot[orderId];
 
       /*
-        A completely new order uses
-        the shining row effect.
+        A completely new order already
+        uses the shining effect.
       */
       if (!previousOrder) {
         return;
@@ -329,8 +341,8 @@ const mergeOrderChanges = (
       });
 
       /*
-        Replace the earlier change
-        for the same product.
+        Replace older changes for
+        the same item.
       */
       changes.forEach((change) => {
         const changeKey =
@@ -388,6 +400,11 @@ function App() {
     )
   );
 
+  const [
+    updatingItemKeys,
+    setUpdatingItemKeys
+  ] = useState([]);
+
   const serverSnapshotRef = useRef(
     getSavedObject(
       SERVER_SNAPSHOT_STORAGE_KEY
@@ -396,6 +413,16 @@ function App() {
 
   const isFetchingRef = useRef(false);
   const justDraggedRef = useRef(false);
+
+  /*
+    Keep an optimistic packaging value
+    while a PUT request is still running.
+    This prevents the 3-second poll from
+    temporarily changing the button back.
+  */
+  const pendingPackagingRef = useRef(
+    new Map()
+  );
 
   const fetchApprovals = useCallback(
     async (silent = false) => {
@@ -411,17 +438,12 @@ function App() {
 
       try {
         const response =
-          await axios.get(API_URL);
+          await axios.get(APPROVALS_API_URL);
 
         const responseOrders =
           Array.isArray(response.data)
             ? response.data
             : [];
-
-        const savedStatuses =
-          getSavedObject(
-            PACKAGING_STORAGE_KEY
-          );
 
         const savedTypeOverrides =
           getSavedObject(
@@ -437,14 +459,8 @@ function App() {
                   : [];
 
               /*
-                A stable backend order ID is
-                recommended.
-
-                Priority:
-                1. order.id
-                2. order.approval_id
-                3. order.link
-                4. generated fallback
+                A stable order ID from the
+                backend is recommended.
               */
               const orderId = String(
                 order.id ||
@@ -458,10 +474,6 @@ function App() {
               const formattedItems =
                 items.map(
                   (item, itemIndex) => {
-                    /*
-                      Product code is used as
-                      the item identity.
-                    */
                     const itemId = String(
                       item.id ||
                       item.code ||
@@ -475,6 +487,11 @@ function App() {
 
                     const quantity =
                       Number(item.qty);
+
+                    const pendingStatus =
+                      pendingPackagingRef
+                        .current
+                        .get(storageKey);
 
                     return {
                       itemId,
@@ -494,10 +511,18 @@ function App() {
 
                       storageKey,
 
+                      /*
+                        The backend value is
+                        shared by every browser.
+                        A pending local value is
+                        only used until the PUT
+                        request finishes.
+                      */
                       packaged:
-                        savedStatuses[
-                          storageKey
-                        ] ?? false
+                        pendingStatus ??
+                        Boolean(
+                          item.packaged
+                        )
                     };
                   }
                 );
@@ -544,63 +569,6 @@ function App() {
               )
             : {};
 
-        /*
-          Reset item packaging when:
-          1. A new product is added
-          2. Product quantity increases
-        */
-        Object.entries(
-          detectedChanges
-        ).forEach(
-          ([orderId, changes]) => {
-            const changedOrder =
-              formattedOrders.find(
-                (order) =>
-                  order.id === orderId
-              );
-
-            if (!changedOrder) {
-              return;
-            }
-
-            changes.forEach(
-              (change) => {
-                const needsRepacking =
-                  change.type ===
-                    "new-item" ||
-                  change.type ===
-                    "quantity-add";
-
-                if (!needsRepacking) {
-                  return;
-                }
-
-                const changedItem =
-                  changedOrder.items.find(
-                    (item) =>
-                      item.itemId ===
-                      change.itemId
-                  );
-
-                if (!changedItem) {
-                  return;
-                }
-
-                changedItem.packaged =
-                  false;
-
-                savedStatuses[
-                  changedItem.storageKey
-                ] = false;
-              }
-            );
-          }
-        );
-
-        saveObject(
-          PACKAGING_STORAGE_KEY,
-          savedStatuses
-        );
 
         const fetchedOrderIds =
           formattedOrders.map(
@@ -608,8 +576,8 @@ function App() {
           );
 
         /*
-          Save and display item or
-          quantity changes.
+          Save item and quantity
+          change alerts.
         */
         setOrderChanges(
           (currentChanges) => {
@@ -620,9 +588,8 @@ function App() {
               );
 
             /*
-              Remove change alerts belonging
-              to orders no longer returned
-              by the server.
+              Remove changes belonging
+              to deleted orders.
             */
             nextChanges =
               Object.fromEntries(
@@ -717,7 +684,7 @@ function App() {
   );
 
   /*
-    Automatically retrieve orders
+    Automatically request updates
     every three seconds.
   */
   useEffect(() => {
@@ -736,8 +703,8 @@ function App() {
   }, [fetchApprovals]);
 
   /*
-    Fixed card order.
-    Empty cards do not move.
+    Build each card while keeping
+    the card order fixed.
   */
   const orderSectionsWithOrders =
     useMemo(() => {
@@ -832,14 +799,13 @@ function App() {
 
     if (!isCurrentlyOpen) {
       /*
-        Stop new-order shining when
-        the order is opened.
+        Stop the shining effect.
       */
       markOrderAsSeen(orderId);
 
       /*
-        Clear item-change alerts shortly
-        after the order is opened.
+        Clear item-change alerts after
+        the order is opened.
       */
       setTimeout(() => {
         clearOrderChanges(orderId);
@@ -847,64 +813,196 @@ function App() {
     }
   };
 
-  const updateItem = (
+  const updateItem = async (
     orderId,
     itemIndex
   ) => {
+    const selectedOrder =
+      orders.find(
+        (order) =>
+          order.id === orderId
+      );
+
+    const selectedItem =
+      selectedOrder?.items[
+        itemIndex
+      ];
+
+    if (!selectedItem) {
+      return;
+    }
+
+    if (
+      updatingItemKeys.includes(
+        selectedItem.storageKey
+      )
+    ) {
+      return;
+    }
+
+    const previousStatus =
+      Boolean(
+        selectedItem.packaged
+      );
+
+    const newStatus =
+      !previousStatus;
+
+    /*
+      Optimistically update this browser
+      immediately while the backend saves
+      the shared status.
+    */
+    pendingPackagingRef.current.set(
+      selectedItem.storageKey,
+      newStatus
+    );
+
+    setUpdatingItemKeys(
+      (currentKeys) => [
+        ...currentKeys,
+        selectedItem.storageKey
+      ]
+    );
+
     setOrders(
       (currentOrders) =>
         currentOrders.map(
-          (order) => {
-            if (
-              order.id !== orderId
-            ) {
-              return order;
-            }
-
-            const updatedItems =
-              order.items.map(
-                (
-                  item,
-                  currentItemIndex
-                ) => {
-                  if (
-                    currentItemIndex !==
-                    itemIndex
-                  ) {
-                    return item;
-                  }
-
-                  const newStatus =
-                    !item.packaged;
-
-                  const savedStatuses =
-                    getSavedObject(
-                      PACKAGING_STORAGE_KEY
-                    );
-
-                  savedStatuses[
-                    item.storageKey
-                  ] = newStatus;
-
-                  saveObject(
-                    PACKAGING_STORAGE_KEY,
-                    savedStatuses
-                  );
-
-                  return {
-                    ...item,
-                    packaged: newStatus
-                  };
+          (order) =>
+            order.id === orderId
+              ? {
+                  ...order,
+                  items:
+                    order.items.map(
+                      (
+                        item,
+                        currentItemIndex
+                      ) =>
+                        currentItemIndex ===
+                        itemIndex
+                          ? {
+                              ...item,
+                              packaged:
+                                newStatus
+                            }
+                          : item
+                    )
                 }
-              );
-
-            return {
-              ...order,
-              items: updatedItems
-            };
-          }
+              : order
         )
     );
+
+    try {
+      const response =
+        await axios.put(
+          PACKAGING_STATUS_API_URL,
+          {
+            order_id: orderId,
+            item_id:
+              selectedItem.itemId,
+            product_code:
+              selectedItem.product_code,
+            quantity:
+              selectedItem.quantity,
+            packaged: newStatus
+          }
+        );
+
+      const confirmedStatus =
+        Boolean(
+          response.data?.packaged
+        );
+
+      pendingPackagingRef.current.set(
+        selectedItem.storageKey,
+        confirmedStatus
+      );
+
+      setOrders(
+        (currentOrders) =>
+          currentOrders.map(
+            (order) =>
+              order.id === orderId
+                ? {
+                    ...order,
+                    items:
+                      order.items.map(
+                        (item) =>
+                          item.itemId ===
+                          selectedItem.itemId
+                            ? {
+                                ...item,
+                                packaged:
+                                  confirmedStatus
+                              }
+                            : item
+                      )
+                  }
+                : order
+          )
+      );
+    } catch (error) {
+      console.error(
+        "Cannot update packaging status",
+        error
+      );
+
+      /*
+        Roll back the optimistic change
+        when the server cannot save it.
+      */
+      pendingPackagingRef.current.set(
+        selectedItem.storageKey,
+        previousStatus
+      );
+
+      setOrders(
+        (currentOrders) =>
+          currentOrders.map(
+            (order) =>
+              order.id === orderId
+                ? {
+                    ...order,
+                    items:
+                      order.items.map(
+                        (item) =>
+                          item.itemId ===
+                          selectedItem.itemId
+                            ? {
+                                ...item,
+                                packaged:
+                                  previousStatus
+                              }
+                            : item
+                      )
+                  }
+                : order
+          )
+      );
+
+      window.alert(
+        "Packaging status was not saved. Please try again."
+      );
+    } finally {
+      pendingPackagingRef.current.delete(
+        selectedItem.storageKey
+      );
+
+      setUpdatingItemKeys(
+        (currentKeys) =>
+          currentKeys.filter(
+            (key) =>
+              key !==
+              selectedItem.storageKey
+          )
+      );
+
+      /*
+        Read the final shared value back
+        from the backend.
+      */
+      fetchApprovals(true);
+    }
   };
 
   const getPackagingStatus = (
@@ -980,8 +1078,8 @@ function App() {
     targetType
   ) => {
     /*
-      Any order can move to New,
-      Trip or Hold.
+      New, Trip and Hold accept
+      any order.
     */
     if (targetType !== "send_now") {
       return true;
@@ -999,19 +1097,20 @@ function App() {
   /*
     Approval action will be added here
     later.
-
-    Currently this function performs
-    no action.
   */
-  const approveOrder = async () => {};
+  const approveOrder = async () => {
+    /*
+      Leave blank first.
+    */
+  };
 
   const resetDragState = () => {
     setDraggingOrderId(null);
     setDragOverSection(null);
 
     /*
-      Ignore only the accidental click
-      immediately after dragging.
+      Ignore the accidental click
+      generated immediately after drag.
     */
     setTimeout(() => {
       justDraggedRef.current =
@@ -1063,10 +1162,6 @@ function App() {
       return;
     }
 
-    /*
-      Preventing the default action
-      enables dropping.
-    */
     event.preventDefault();
 
     event.dataTransfer.dropEffect =
@@ -1154,11 +1249,9 @@ function App() {
 
     /*
       A fully packaged order dropped
-      into Send Now will call the
-      approval function immediately.
+      into Send Now calls this function.
 
-      The approval function is currently
-      empty.
+      It is blank for now.
     */
     if (
       targetType === "send_now"
@@ -1509,6 +1602,11 @@ function App() {
                                                     ? "packed"
                                                     : "not-packed"
                                                 }
+                                                disabled={
+                                                  updatingItemKeys.includes(
+                                                    item.storageKey
+                                                  )
+                                                }
                                                 onClick={(
                                                   event
                                                 ) => {
@@ -1520,9 +1618,13 @@ function App() {
                                                   );
                                                 }}
                                               >
-                                                {item.packaged
-                                                  ? "✓ Packed"
-                                                  : "Pack"}
+                                                {updatingItemKeys.includes(
+                                                  item.storageKey
+                                                )
+                                                  ? "Saving..."
+                                                  : item.packaged
+                                                    ? "✓ Packed"
+                                                    : "Pack"}
                                               </button>
                                             </td>
                                           </tr>
@@ -1551,6 +1653,22 @@ function App() {
     );
   };
 
+  /*
+    Send Now is separated from the
+    normal card grid.
+  */
+  const regularSections =
+    orderSectionsWithOrders.filter(
+      (section) =>
+        section.type !== "send_now"
+    );
+
+  const sendNowSection =
+    orderSectionsWithOrders.find(
+      (section) =>
+        section.type === "send_now"
+    );
+
   return (
     <div className="page">
       <div className="page-header">
@@ -1559,35 +1677,56 @@ function App() {
 
           <p className="page-description">
             Click an order to expand it.
-            Drag an order to move it into
-            another card.
+            Drag a fully packaged order
+            into the fixed Send Now card.
           </p>
         </div>
 
-        <div className="live-panel">
-          <div className="live-line">
-            <span className="live-dot"></span>
+        <div className="header-actions">
+          <PwaInstallButton />
 
-            <span>
-              {loading
-                ? "Connecting"
-                : "Live"}
-            </span>
-          </div>
+          <div className="live-panel">
+            <div className="live-line">
+              <span className="live-dot"></span>
 
-          <div className="last-updated">
-            {lastUpdated
-              ? `Updated ${lastUpdated.toLocaleTimeString()}`
-              : "Waiting for data"}
+              <span>
+                {loading
+                  ? "Connecting"
+                  : "Live"}
+              </span>
+            </div>
+
+            <div className="last-updated">
+              {lastUpdated
+                ? `Updated ${lastUpdated.toLocaleTimeString()}`
+                : "Waiting for data"}
+            </div>
           </div>
         </div>
       </div>
 
       <div className="card-grid">
-        {orderSectionsWithOrders.map(
+        {regularSections.map(
           renderOrderCard
         )}
       </div>
+
+      {sendNowSection && (
+        <div
+          className={`
+            fixed-send-now-dock
+            ${
+              draggingOrderId
+                ? "drag-active"
+                : ""
+            }
+          `}
+        >
+          {renderOrderCard(
+            sendNowSection
+          )}
+        </div>
+      )}
     </div>
   );
 }
