@@ -1,45 +1,16 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState
-} from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import "./App.css";
 import PwaInstallButton from "./PwaInstallButton";
-
-const API_BASE_URL =
-  "https://sse-sales-check.onrender.com";
-
-const APPROVALS_API_URL =
-  `${API_BASE_URL}/approvals`;
-
-const PACKAGING_STATUS_API_URL =
-  `${API_BASE_URL}/packaging-status`;
-
+const API_BASE_URL = "http://localhost:5000";
+const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
+const PACKAGING_STATUS_API_URL = `${API_BASE_URL}/packaging-status`;
 const POLL_INTERVAL_MS = 3000;
-
-const ORDER_TYPE_STORAGE_KEY =
-  "order-type-overrides";
-
-const SEEN_ORDERS_STORAGE_KEY =
-  "seen-order-ids";
-
-const SERVER_SNAPSHOT_STORAGE_KEY =
-  "packaging-server-snapshot";
-
-const ORDER_CHANGES_STORAGE_KEY =
-  "packaging-order-changes";
-
-/*
-  Normal grid:
-  New, Trip, Hold
-
-  Fixed at bottom:
-  Send Now
-*/
+const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
+const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
+const SERVER_SNAPSHOT_STORAGE_KEY = "packaging-server-snapshot";
+const ORDER_CHANGES_STORAGE_KEY = "packaging-order-changes";
+// Normal grid: New, Trip, Hold. Fixed at bottom: Send Now.
 const ORDER_SECTIONS = [
   {
     title: "New",
@@ -50,109 +21,56 @@ const ORDER_SECTIONS = [
     type: "trip"
   },
   {
-    title: "Send Now",
-    type: "send_now"
-  },
-  {
     title: "Hold",
     type: "hold"
+  },
+  {
+    title: "Send Now",
+    type: "send_now"
   }
 ];
-
 const getSavedObject = (storageKey) => {
   try {
-    return (
-      JSON.parse(
-        localStorage.getItem(storageKey)
-      ) || {}
-    );
+    return JSON.parse(localStorage.getItem(storageKey)) || {};
   } catch (error) {
-    console.error(
-      `Cannot read ${storageKey}`,
-      error
-    );
-
+    console.error(`Cannot read ${storageKey}`, error);
     return {};
   }
 };
-
-const saveObject = (
-  storageKey,
-  value
-) => {
-  localStorage.setItem(
-    storageKey,
-    JSON.stringify(value)
-  );
+const saveObject = (storageKey, value) => {
+  localStorage.setItem(storageKey, JSON.stringify(value));
 };
-
 const getSavedArray = (storageKey) => {
   try {
-    const result = JSON.parse(
-      localStorage.getItem(storageKey)
-    );
-
-    return Array.isArray(result)
-      ? result
-      : [];
+    const result = JSON.parse(localStorage.getItem(storageKey));
+    return Array.isArray(result) ? result : [];
   } catch (error) {
-    console.error(
-      `Cannot read ${storageKey}`,
-      error
-    );
-
+    console.error(`Cannot read ${storageKey}`, error);
     return [];
   }
 };
-
-const saveArray = (
-  storageKey,
-  value
-) => {
-  localStorage.setItem(
-    storageKey,
-    JSON.stringify(value)
-  );
+const saveArray = (storageKey, value) => {
+  localStorage.setItem(storageKey, JSON.stringify(value));
 };
-
 const getOrderType = (remark) => {
-  const value = String(remark || "")
-    .toLowerCase()
-    .trim();
-
-  /*
-    Send Now must exactly equal
-    "send now".
-  */
-  if (value === "send now") {
+  const value = String(remark || "").toLowerCase().trim();
+  // Any remark containing "now" or exactly equal to "sn" becomes Send Now.
+  if (value === "sn" || /now/.test(value)) {
     return "send_now";
   }
-
-  /*
-    Any remark containing a number
-    becomes Trip.
-  */
+  // Any remark containing a number becomes Trip.
   if (/\d/.test(value)) {
     return "trip";
   }
-
   if (value.includes("hold")) {
     return "hold";
   }
-
-  /*
-    Empty or other remarks become New.
-  */
+  // Empty or other remarks become New.
   return "new";
 };
-
 const getResolvedOrderType = (order) => {
-  return (
-    order.manualType ||
-    getOrderType(order.remark)
-  );
+  return order.manualType || getOrderType(order.remark);
 };
-
 const buildServerSnapshot = (orders) => {
   return Object.fromEntries(
     orders.map((order) => [
@@ -162,14 +80,9 @@ const buildServerSnapshot = (orders) => {
           order.items.map((item) => [
             item.itemId,
             {
-              product_code:
-                item.product_code,
-
-              product_name:
-                item.product_name,
-
-              quantity:
-                item.quantity
+              product_code: item.product_code,
+              product_name: item.product_name,
+              quantity: item.quantity
             }
           ])
         )
@@ -177,1165 +90,502 @@ const buildServerSnapshot = (orders) => {
     ])
   );
 };
-
-const detectOrderChanges = (
-  previousSnapshot,
-  currentSnapshot
-) => {
+const detectOrderChanges = (previousSnapshot, currentSnapshot) => {
   const detectedChanges = {};
-
-  Object.entries(
-    currentSnapshot
-  ).forEach(
-    ([orderId, currentOrder]) => {
-      const previousOrder =
-        previousSnapshot[orderId];
-
-      /*
-        A completely new order already
-        uses the shining effect.
-      */
-      if (!previousOrder) {
+  Object.entries(currentSnapshot).forEach(([orderId, currentOrder]) => {
+    const previousOrder = previousSnapshot[orderId];
+    // A completely new order already uses the shining effect.
+    if (!previousOrder) {
+      return;
+    }
+    const previousItems = previousOrder.items || {};
+    const currentItems = currentOrder.items || {};
+    const changes = [];
+    // Detect new items and quantity changes.
+    Object.entries(currentItems).forEach(([itemId, currentItem]) => {
+      const previousItem = previousItems[itemId];
+      if (!previousItem) {
+        changes.push({
+          type: "new-item",
+          group: "presence",
+          itemId,
+          label: "New Item",
+          product_code: currentItem.product_code,
+          product_name: currentItem.product_name
+        });
         return;
       }
-
-      const previousItems =
-        previousOrder.items || {};
-
-      const currentItems =
-        currentOrder.items || {};
-
-      const changes = [];
-
-      /*
-        Detect new items and
-        quantity changes.
-      */
-      Object.entries(
-        currentItems
-      ).forEach(
-        ([itemId, currentItem]) => {
-          const previousItem =
-            previousItems[itemId];
-
-          if (!previousItem) {
-            changes.push({
-              type: "new-item",
-              group: "presence",
-              itemId,
-              label: "New Item",
-
-              product_code:
-                currentItem.product_code,
-
-              product_name:
-                currentItem.product_name
-            });
-
-            return;
-          }
-
-          const quantityDifference =
-            currentItem.quantity -
-            previousItem.quantity;
-
-          if (quantityDifference > 0) {
-            changes.push({
-              type: "quantity-add",
-              group: "quantity",
-              itemId,
-
-              label:
-                `+${quantityDifference}`,
-
-              product_code:
-                currentItem.product_code,
-
-              product_name:
-                currentItem.product_name
-            });
-          }
-
-          if (quantityDifference < 0) {
-            changes.push({
-              type: "quantity-remove",
-              group: "quantity",
-              itemId,
-
-              label:
-                `${quantityDifference}`,
-
-              product_code:
-                currentItem.product_code,
-
-              product_name:
-                currentItem.product_name
-            });
-          }
-        }
-      );
-
-      /*
-        Detect removed items.
-      */
-      Object.entries(
-        previousItems
-      ).forEach(
-        ([itemId, previousItem]) => {
-          if (!currentItems[itemId]) {
-            changes.push({
-              type: "remove-item",
-              group: "presence",
-              itemId,
-              label: "Remove Item",
-
-              product_code:
-                previousItem.product_code,
-
-              product_name:
-                previousItem.product_name
-            });
-          }
-        }
-      );
-
-      if (changes.length > 0) {
-        detectedChanges[orderId] =
-          changes;
+      const quantityDifference = currentItem.quantity - previousItem.quantity;
+      if (quantityDifference > 0) {
+        changes.push({
+          type: "quantity-add",
+          group: "quantity",
+          itemId,
+          label: `+${quantityDifference}`,
+          product_code: currentItem.product_code,
+          product_name: currentItem.product_name
+        });
       }
+      if (quantityDifference < 0) {
+        changes.push({
+          type: "quantity-remove",
+          group: "quantity",
+          itemId,
+          label: `${quantityDifference}`,
+          product_code: currentItem.product_code,
+          product_name: currentItem.product_name
+        });
+      }
+    });
+    // Detect removed items.
+    Object.entries(previousItems).forEach(([itemId, previousItem]) => {
+      if (!currentItems[itemId]) {
+        changes.push({
+          type: "remove-item",
+          group: "presence",
+          itemId,
+          label: "Remove Item",
+          product_code: previousItem.product_code,
+          product_name: previousItem.product_name
+        });
+      }
+    });
+    if (changes.length > 0) {
+      detectedChanges[orderId] = changes;
     }
-  );
-
+  });
   return detectedChanges;
 };
-
-const mergeOrderChanges = (
-  currentChanges,
-  detectedChanges
-) => {
+const mergeOrderChanges = (currentChanges, detectedChanges) => {
   const nextChanges = {
     ...currentChanges
   };
-
-  Object.entries(
-    detectedChanges
-  ).forEach(
-    ([orderId, changes]) => {
-      const changeMap = new Map();
-
-      /*
-        Keep existing changes that
-        have not been acknowledged.
-      */
-      (
-        nextChanges[orderId] || []
-      ).forEach((change) => {
-        const changeKey =
-          `${change.itemId}-` +
-          `${change.group}`;
-
-        changeMap.set(
-          changeKey,
-          change
-        );
-      });
-
-      /*
-        Replace older changes for
-        the same item.
-      */
-      changes.forEach((change) => {
-        const changeKey =
-          `${change.itemId}-` +
-          `${change.group}`;
-
-        changeMap.set(
-          changeKey,
-          change
-        );
-      });
-
-      nextChanges[orderId] =
-        Array.from(
-          changeMap.values()
-        );
-    }
-  );
-
+  Object.entries(detectedChanges).forEach(([orderId, changes]) => {
+    const changeMap = new Map();
+    // Keep existing changes that have not been acknowledged.
+    (nextChanges[orderId] || []).forEach((change) => {
+      const changeKey = `${change.itemId}-${change.group}`;
+      changeMap.set(changeKey, change);
+    });
+    // Replace older changes for the same item.
+    changes.forEach((change) => {
+      const changeKey = `${change.itemId}-${change.group}`;
+      changeMap.set(changeKey, change);
+    });
+    nextChanges[orderId] = Array.from(changeMap.values());
+  });
   return nextChanges;
 };
-
 function App() {
-  const [orders, setOrders] =
-    useState([]);
-
-  const [openRows, setOpenRows] =
-    useState([]);
-
-  const [newOrderIds, setNewOrderIds] =
-    useState([]);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [lastUpdated, setLastUpdated] =
-    useState(null);
-
-  const [
-    draggingOrderId,
-    setDraggingOrderId
-  ] = useState(null);
-
-  const [
-    dragOverSection,
-    setDragOverSection
-  ] = useState(null);
-
-  const [
-    orderChanges,
-    setOrderChanges
-  ] = useState(() =>
-    getSavedObject(
-      ORDER_CHANGES_STORAGE_KEY
-    )
-  );
-
-  const [
-    updatingItemKeys,
-    setUpdatingItemKeys
-  ] = useState([]);
-
-  const serverSnapshotRef = useRef(
-    getSavedObject(
-      SERVER_SNAPSHOT_STORAGE_KEY
-    )
-  );
-
+  const [orders, setOrders] = useState([]);
+  const [openRows, setOpenRows] = useState([]);
+  const [newOrderIds, setNewOrderIds] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [draggingOrderId, setDraggingOrderId] = useState(null);
+  const [dragOverSection, setDragOverSection] = useState(null);
+  const [orderChanges, setOrderChanges] = useState(() => getSavedObject(ORDER_CHANGES_STORAGE_KEY));
+  const [updatingItemKeys, setUpdatingItemKeys] = useState([]);
+  const serverSnapshotRef = useRef(getSavedObject(SERVER_SNAPSHOT_STORAGE_KEY));
   const isFetchingRef = useRef(false);
   const justDraggedRef = useRef(false);
-
-  /*
-    Keep an optimistic packaging value
-    while a PUT request is still running.
-    This prevents the 3-second poll from
-    temporarily changing the button back.
-  */
-  const pendingPackagingRef = useRef(
-    new Map()
-  );
-
-  const fetchApprovals = useCallback(
-    async (silent = false) => {
-      if (isFetchingRef.current) {
-        return;
+  // Keep an optimistic value while the PUT request is running to prevent polling from changing the button back.
+  const pendingPackagingRef = useRef(new Map());
+  const fetchApprovals = useCallback(async (silent = false) => {
+    if (isFetchingRef.current) {
+      return;
+    }
+    isFetchingRef.current = true;
+    if (!silent) {
+      setLoading(true);
+    }
+    try {
+      const response = await axios.get(APPROVALS_API_URL);
+      const responseOrders = Array.isArray(response.data) ? response.data : [];
+      const savedTypeOverrides = getSavedObject(ORDER_TYPE_STORAGE_KEY);
+      const formattedOrders = responseOrders.map((order, orderIndex) => {
+        const items = Array.isArray(order.items) ? order.items : [];
+        // A stable order ID from the backend is recommended.
+        const orderId = String(
+          order.id ||
+          order.approval_id ||
+          order.link ||
+          `${order.dealer}-${order.date}-${orderIndex}`
+        );
+        const formattedItems = items.map((item, itemIndex) => {
+          const itemId = String(item.id || item.code || `${item.name}-${itemIndex}`);
+          const storageKey = `${orderId}-${itemId}`;
+          const quantity = Number(item.qty);
+          const pendingStatus = pendingPackagingRef.current.get(storageKey);
+          return {
+            itemId,
+            product_code: item.code || "-",
+            product_name: item.name || "-",
+            quantity: Number.isFinite(quantity) ? quantity : 0,
+            storageKey,
+            // Backend values are shared by every browser; pending local values remain until the PUT request finishes.
+            packaged: pendingStatus ?? Boolean(item.packaged)
+          };
+        });
+        return {
+          id: orderId,
+          name: order.dealer || "Unknown Dealer",
+          remark: order.remark,
+          date: order.date,
+          link: order.link,
+          manualType: savedTypeOverrides[orderId] || null,
+          items: formattedItems
+        };
+      });
+      const currentSnapshot = buildServerSnapshot(formattedOrders);
+      const previousSnapshot = serverSnapshotRef.current;
+      const hasPreviousSnapshot = Object.keys(previousSnapshot).length > 0;
+      const detectedChanges = hasPreviousSnapshot
+        ? detectOrderChanges(previousSnapshot, currentSnapshot)
+        : {};
+      const fetchedOrderIds = formattedOrders.map((order) => order.id);
+      // Save item and quantity change alerts.
+      setOrderChanges((currentChanges) => {
+        let nextChanges = mergeOrderChanges(currentChanges, detectedChanges);
+        // Remove changes belonging to deleted orders.
+        nextChanges = Object.fromEntries(
+          Object.entries(nextChanges).filter(([orderId]) => fetchedOrderIds.includes(orderId))
+        );
+        saveObject(ORDER_CHANGES_STORAGE_KEY, nextChanges);
+        return nextChanges;
+      });
+      serverSnapshotRef.current = currentSnapshot;
+      saveObject(SERVER_SNAPSHOT_STORAGE_KEY, currentSnapshot);
+      // Detect completely new orders.
+      const hasSeenStorage = localStorage.getItem(SEEN_ORDERS_STORAGE_KEY) !== null;
+      if (!hasSeenStorage) {
+        saveArray(SEEN_ORDERS_STORAGE_KEY, fetchedOrderIds);
+        setNewOrderIds([]);
+      } else {
+        const seenOrderIds = getSavedArray(SEEN_ORDERS_STORAGE_KEY);
+        const newlyAddedIds = fetchedOrderIds.filter((id) => !seenOrderIds.includes(id));
+        setNewOrderIds((currentNewIds) => [
+          ...new Set([
+            ...currentNewIds.filter((id) => fetchedOrderIds.includes(id)),
+            ...newlyAddedIds
+          ])
+        ]);
       }
-
-      isFetchingRef.current = true;
-
+      setOrders(formattedOrders);
+      setLastUpdated(new Date());
+    } catch (error) {
+      console.error("Request Failed", error);
+    } finally {
+      isFetchingRef.current = false;
       if (!silent) {
-        setLoading(true);
+        setLoading(false);
       }
-
-      try {
-        const response =
-          await axios.get(APPROVALS_API_URL);
-
-        const responseOrders =
-          Array.isArray(response.data)
-            ? response.data
-            : [];
-
-        const savedTypeOverrides =
-          getSavedObject(
-            ORDER_TYPE_STORAGE_KEY
-          );
-
-        const formattedOrders =
-          responseOrders.map(
-            (order, orderIndex) => {
-              const items =
-                Array.isArray(order.items)
-                  ? order.items
-                  : [];
-
-              /*
-                A stable order ID from the
-                backend is recommended.
-              */
-              const orderId = String(
-                order.id ||
-                order.approval_id ||
-                order.link ||
-                `${order.dealer}-` +
-                  `${order.date}-` +
-                  `${orderIndex}`
-              );
-
-              const formattedItems =
-                items.map(
-                  (item, itemIndex) => {
-                    const itemId = String(
-                      item.id ||
-                      item.code ||
-                      `${item.name}-` +
-                        `${itemIndex}`
-                    );
-
-                    const storageKey =
-                      `${orderId}-` +
-                      `${itemId}`;
-
-                    const quantity =
-                      Number(item.qty);
-
-                    const pendingStatus =
-                      pendingPackagingRef
-                        .current
-                        .get(storageKey);
-
-                    return {
-                      itemId,
-
-                      product_code:
-                        item.code || "-",
-
-                      product_name:
-                        item.name || "-",
-
-                      quantity:
-                        Number.isFinite(
-                          quantity
-                        )
-                          ? quantity
-                          : 0,
-
-                      storageKey,
-
-                      /*
-                        The backend value is
-                        shared by every browser.
-                        A pending local value is
-                        only used until the PUT
-                        request finishes.
-                      */
-                      packaged:
-                        pendingStatus ??
-                        Boolean(
-                          item.packaged
-                        )
-                    };
-                  }
-                );
-
-              return {
-                id: orderId,
-
-                name:
-                  order.dealer ||
-                  "Unknown Dealer",
-
-                remark: order.remark,
-                date: order.date,
-                link: order.link,
-
-                manualType:
-                  savedTypeOverrides[
-                    orderId
-                  ] || null,
-
-                items: formattedItems
-              };
-            }
-          );
-
-        const currentSnapshot =
-          buildServerSnapshot(
-            formattedOrders
-          );
-
-        const previousSnapshot =
-          serverSnapshotRef.current;
-
-        const hasPreviousSnapshot =
-          Object.keys(
-            previousSnapshot
-          ).length > 0;
-
-        const detectedChanges =
-          hasPreviousSnapshot
-            ? detectOrderChanges(
-                previousSnapshot,
-                currentSnapshot
-              )
-            : {};
-
-
-        const fetchedOrderIds =
-          formattedOrders.map(
-            (order) => order.id
-          );
-
-        /*
-          Save item and quantity
-          change alerts.
-        */
-        setOrderChanges(
-          (currentChanges) => {
-            let nextChanges =
-              mergeOrderChanges(
-                currentChanges,
-                detectedChanges
-              );
-
-            /*
-              Remove changes belonging
-              to deleted orders.
-            */
-            nextChanges =
-              Object.fromEntries(
-                Object.entries(
-                  nextChanges
-                ).filter(
-                  ([orderId]) =>
-                    fetchedOrderIds.includes(
-                      orderId
-                    )
-                )
-              );
-
-            saveObject(
-              ORDER_CHANGES_STORAGE_KEY,
-              nextChanges
-            );
-
-            return nextChanges;
-          }
-        );
-
-        serverSnapshotRef.current =
-          currentSnapshot;
-
-        saveObject(
-          SERVER_SNAPSHOT_STORAGE_KEY,
-          currentSnapshot
-        );
-
-        /*
-          Detect completely new orders.
-        */
-        const hasSeenStorage =
-          localStorage.getItem(
-            SEEN_ORDERS_STORAGE_KEY
-          ) !== null;
-
-        if (!hasSeenStorage) {
-          saveArray(
-            SEEN_ORDERS_STORAGE_KEY,
-            fetchedOrderIds
-          );
-
-          setNewOrderIds([]);
-        } else {
-          const seenOrderIds =
-            getSavedArray(
-              SEEN_ORDERS_STORAGE_KEY
-            );
-
-          const newlyAddedIds =
-            fetchedOrderIds.filter(
-              (id) =>
-                !seenOrderIds.includes(
-                  id
-                )
-            );
-
-          setNewOrderIds(
-            (currentNewIds) => [
-              ...new Set([
-                ...currentNewIds.filter(
-                  (id) =>
-                    fetchedOrderIds.includes(
-                      id
-                    )
-                ),
-                ...newlyAddedIds
-              ])
-            ]
-          );
-        }
-
-        setOrders(formattedOrders);
-        setLastUpdated(new Date());
-      } catch (error) {
-        console.error(
-          "Request Failed",
-          error
-        );
-      } finally {
-        isFetchingRef.current =
-          false;
-
-        if (!silent) {
-          setLoading(false);
-        }
-      }
-    },
-    []
-  );
-
-  /*
-    Automatically request updates
-    every three seconds.
-  */
+    }
+  }, []);
+  // Automatically request updates every three seconds.
   useEffect(() => {
     fetchApprovals(false);
-
-    const intervalId = setInterval(
-      () => {
-        fetchApprovals(true);
-      },
-      POLL_INTERVAL_MS
-    );
-
+    const intervalId = setInterval(() => {
+      fetchApprovals(true);
+    }, POLL_INTERVAL_MS);
     return () => {
       clearInterval(intervalId);
     };
   }, [fetchApprovals]);
-
-  /*
-    Build each card while keeping
-    the card order fixed.
-  */
-  const orderSectionsWithOrders =
-    useMemo(() => {
-      return ORDER_SECTIONS.map(
-        (section) => {
-          const sectionOrders =
-            orders.filter(
-              (order) =>
-                getResolvedOrderType(
-                  order
-                ) === section.type
-            );
-
-          return {
-            ...section,
-            orders: sectionOrders
-          };
-        }
+  // Build each card while keeping the card order fixed.
+  const orderSectionsWithOrders = useMemo(() => {
+    return ORDER_SECTIONS.map((section) => {
+      const sectionOrders = orders.filter(
+        (order) => getResolvedOrderType(order) === section.type
       );
-    }, [orders]);
-
-  const markOrderAsSeen = (
-    orderId
-  ) => {
-    setNewOrderIds(
-      (currentNewIds) =>
-        currentNewIds.filter(
-          (id) => id !== orderId
-        )
+      return {
+        ...section,
+        orders: sectionOrders
+      };
+    });
+  }, [orders]);
+  const markOrderAsSeen = (orderId) => {
+    setNewOrderIds((currentNewIds) =>
+      currentNewIds.filter((id) => id !== orderId)
     );
-
-    const seenOrderIds =
-      getSavedArray(
-        SEEN_ORDERS_STORAGE_KEY
-      );
-
-    if (
-      !seenOrderIds.includes(orderId)
-    ) {
-      saveArray(
-        SEEN_ORDERS_STORAGE_KEY,
-        [
-          ...seenOrderIds,
-          orderId
-        ]
-      );
+    const seenOrderIds = getSavedArray(SEEN_ORDERS_STORAGE_KEY);
+    if (!seenOrderIds.includes(orderId)) {
+      saveArray(SEEN_ORDERS_STORAGE_KEY, [
+        ...seenOrderIds,
+        orderId
+      ]);
     }
   };
-
-  const clearOrderChanges = (
-    orderId
-  ) => {
-    setOrderChanges(
-      (currentChanges) => {
-        if (
-          !currentChanges[orderId]
-        ) {
-          return currentChanges;
-        }
-
-        const nextChanges = {
-          ...currentChanges
-        };
-
-        delete nextChanges[orderId];
-
-        saveObject(
-          ORDER_CHANGES_STORAGE_KEY,
-          nextChanges
-        );
-
-        return nextChanges;
+  const clearOrderChanges = (orderId) => {
+    setOrderChanges((currentChanges) => {
+      if (!currentChanges[orderId]) {
+        return currentChanges;
       }
-    );
+      const nextChanges = {
+        ...currentChanges
+      };
+      delete nextChanges[orderId];
+      saveObject(ORDER_CHANGES_STORAGE_KEY, nextChanges);
+      return nextChanges;
+    });
   };
-
   const toggleRow = (orderId) => {
-    const isCurrentlyOpen =
-      openRows.includes(orderId);
-
-    setOpenRows(
-      (currentRows) =>
-        currentRows.includes(orderId)
-          ? currentRows.filter(
-              (id) => id !== orderId
-            )
-          : [
-              ...currentRows,
-              orderId
-            ]
+    const isCurrentlyOpen = openRows.includes(orderId);
+    setOpenRows((currentRows) =>
+      currentRows.includes(orderId)
+        ? currentRows.filter((id) => id !== orderId)
+        : [
+            ...currentRows,
+            orderId
+          ]
     );
-
     if (!isCurrentlyOpen) {
-      /*
-        Stop the shining effect.
-      */
+      // Stop the shining effect.
       markOrderAsSeen(orderId);
-
-      /*
-        Clear item-change alerts after
-        the order is opened.
-      */
+      // Clear item-change alerts after the order is opened.
       setTimeout(() => {
         clearOrderChanges(orderId);
       }, 800);
     }
   };
-
-  const updateItem = async (
-    orderId,
-    itemIndex
-  ) => {
-    const selectedOrder =
-      orders.find(
-        (order) =>
-          order.id === orderId
-      );
-
-    const selectedItem =
-      selectedOrder?.items[
-        itemIndex
-      ];
-
+  const updateItem = async (orderId, itemIndex) => {
+    const selectedOrder = orders.find((order) => order.id === orderId);
+    const selectedItem = selectedOrder?.items[itemIndex];
     if (!selectedItem) {
       return;
     }
-
-    if (
-      updatingItemKeys.includes(
-        selectedItem.storageKey
-      )
-    ) {
+    if (updatingItemKeys.includes(selectedItem.storageKey)) {
       return;
     }
-
-    const previousStatus =
-      Boolean(
-        selectedItem.packaged
-      );
-
-    const newStatus =
-      !previousStatus;
-
-    /*
-      Optimistically update this browser
-      immediately while the backend saves
-      the shared status.
-    */
-    pendingPackagingRef.current.set(
-      selectedItem.storageKey,
-      newStatus
+    const previousStatus = Boolean(selectedItem.packaged);
+    const newStatus = !previousStatus;
+    // Optimistically update this browser immediately while the backend saves the shared status.
+    pendingPackagingRef.current.set(selectedItem.storageKey, newStatus);
+    setUpdatingItemKeys((currentKeys) => [
+      ...currentKeys,
+      selectedItem.storageKey
+    ]);
+    setOrders((currentOrders) =>
+      currentOrders.map((order) =>
+        order.id === orderId
+          ? {
+              ...order,
+              items: order.items.map((item, currentItemIndex) =>
+                currentItemIndex === itemIndex
+                  ? {
+                      ...item,
+                      packaged: newStatus
+                    }
+                  : item
+              )
+            }
+          : order
+      )
     );
-
-    setUpdatingItemKeys(
-      (currentKeys) => [
-        ...currentKeys,
-        selectedItem.storageKey
-      ]
-    );
-
-    setOrders(
-      (currentOrders) =>
-        currentOrders.map(
-          (order) =>
-            order.id === orderId
-              ? {
-                  ...order,
-                  items:
-                    order.items.map(
-                      (
-                        item,
-                        currentItemIndex
-                      ) =>
-                        currentItemIndex ===
-                        itemIndex
-                          ? {
-                              ...item,
-                              packaged:
-                                newStatus
-                            }
-                          : item
-                    )
-                }
-              : order
-        )
-    );
-
     try {
-      const response =
-        await axios.put(
-          PACKAGING_STATUS_API_URL,
-          {
-            order_id: orderId,
-            item_id:
-              selectedItem.itemId,
-            product_code:
-              selectedItem.product_code,
-            quantity:
-              selectedItem.quantity,
-            packaged: newStatus
-          }
-        );
-
-      const confirmedStatus =
-        Boolean(
-          response.data?.packaged
-        );
-
-      pendingPackagingRef.current.set(
-        selectedItem.storageKey,
-        confirmedStatus
-      );
-
-      setOrders(
-        (currentOrders) =>
-          currentOrders.map(
-            (order) =>
-              order.id === orderId
-                ? {
-                    ...order,
-                    items:
-                      order.items.map(
-                        (item) =>
-                          item.itemId ===
-                          selectedItem.itemId
-                            ? {
-                                ...item,
-                                packaged:
-                                  confirmedStatus
-                              }
-                            : item
-                      )
-                  }
-                : order
-          )
+      const response = await axios.put(PACKAGING_STATUS_API_URL, {
+        order_id: orderId,
+        item_id: selectedItem.itemId,
+        product_code: selectedItem.product_code,
+        quantity: selectedItem.quantity,
+        packaged: newStatus
+      });
+      const confirmedStatus = Boolean(response.data?.packaged);
+      pendingPackagingRef.current.set(selectedItem.storageKey, confirmedStatus);
+      setOrders((currentOrders) =>
+        currentOrders.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                items: order.items.map((item) =>
+                  item.itemId === selectedItem.itemId
+                    ? {
+                        ...item,
+                        packaged: confirmedStatus
+                      }
+                    : item
+                )
+              }
+            : order
+        )
       );
     } catch (error) {
-      console.error(
-        "Cannot update packaging status",
-        error
+      console.error("Cannot update packaging status", error);
+      // Roll back the optimistic change when the server cannot save it.
+      pendingPackagingRef.current.set(selectedItem.storageKey, previousStatus);
+      setOrders((currentOrders) =>
+        currentOrders.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                items: order.items.map((item) =>
+                  item.itemId === selectedItem.itemId
+                    ? {
+                        ...item,
+                        packaged: previousStatus
+                      }
+                    : item
+                )
+              }
+            : order
+        )
       );
-
-      /*
-        Roll back the optimistic change
-        when the server cannot save it.
-      */
-      pendingPackagingRef.current.set(
-        selectedItem.storageKey,
-        previousStatus
-      );
-
-      setOrders(
-        (currentOrders) =>
-          currentOrders.map(
-            (order) =>
-              order.id === orderId
-                ? {
-                    ...order,
-                    items:
-                      order.items.map(
-                        (item) =>
-                          item.itemId ===
-                          selectedItem.itemId
-                            ? {
-                                ...item,
-                                packaged:
-                                  previousStatus
-                              }
-                            : item
-                      )
-                  }
-                : order
-          )
-      );
-
-      window.alert(
-        "Packaging status was not saved. Please try again."
-      );
+      window.alert("Packaging status was not saved. Please try again.");
     } finally {
-      pendingPackagingRef.current.delete(
-        selectedItem.storageKey
+      pendingPackagingRef.current.delete(selectedItem.storageKey);
+      setUpdatingItemKeys((currentKeys) =>
+        currentKeys.filter((key) => key !== selectedItem.storageKey)
       );
-
-      setUpdatingItemKeys(
-        (currentKeys) =>
-          currentKeys.filter(
-            (key) =>
-              key !==
-              selectedItem.storageKey
-          )
-      );
-
-      /*
-        Read the final shared value back
-        from the backend.
-      */
+      // Read the final shared value back from the backend.
       fetchApprovals(true);
     }
   };
-
-  const getPackagingStatus = (
-    items
-  ) => {
+  const getPackagingStatus = (items) => {
     if (items.length === 0) {
       return "No Items";
     }
-
-    const packed =
-      items.filter(
-        (item) => item.packaged
-      ).length;
-
+    const packed = items.filter((item) => item.packaged).length;
     if (packed === 0) {
       return "Not Packed";
     }
-
-    if (
-      packed === items.length
-    ) {
+    if (packed === items.length) {
       return "Packaged";
     }
-
-    return (
-      `Ongoing ` +
-      `(${packed}/${items.length})`
-    );
+    return `Ongoing (${packed}/${items.length})`;
   };
-
-  const getPackagingClass = (
-    items
-  ) => {
+  const getPackagingClass = (items) => {
     if (items.length === 0) {
       return "not-packed-status";
     }
-
-    const packed =
-      items.filter(
-        (item) => item.packaged
-      ).length;
-
+    const packed = items.filter((item) => item.packaged).length;
     if (packed === 0) {
       return "not-packed-status";
     }
-
-    if (
-      packed === items.length
-    ) {
+    if (packed === items.length) {
       return "packaged-status";
     }
-
     return "ongoing-status";
   };
-
-  const isOrderFullyPackaged = (
-    order
-  ) => {
-    if (
-      !order ||
-      order.items.length === 0
-    ) {
+  const isOrderFullyPackaged = (order) => {
+    if (!order || order.items.length === 0) {
       return false;
     }
-
-    return order.items.every(
-      (item) => item.packaged
-    );
+    return order.items.every((item) => item.packaged);
   };
-
-  const canDropIntoSection = (
-    order,
-    targetType
-  ) => {
-    /*
-      New, Trip and Hold accept
-      any order.
-    */
+  const canDropIntoSection = (order, targetType) => {
+    // New, Trip and Hold accept any order.
     if (targetType !== "send_now") {
       return true;
     }
-
-    /*
-      Send Now only accepts fully
-      packaged orders.
-    */
-    return isOrderFullyPackaged(
-      order
-    );
+    // Send Now only accepts fully packaged orders.
+    return isOrderFullyPackaged(order);
   };
-
-  /*
-    Approval action will be added here
-    later.
-  */
+  // Approval action will be added here later.
   const approveOrder = async () => {
-    /*
-      Leave blank first.
-    */
+    // Leave blank first.
   };
-
   const resetDragState = () => {
     setDraggingOrderId(null);
     setDragOverSection(null);
-
-    /*
-      Ignore the accidental click
-      generated immediately after drag.
-    */
+    // Ignore the accidental click generated immediately after drag.
     setTimeout(() => {
-      justDraggedRef.current =
-        false;
+      justDraggedRef.current = false;
     }, 180);
   };
-
-  const handleDragStart = (
-    event,
-    orderId
-  ) => {
+  const handleDragStart = (event, orderId) => {
     justDraggedRef.current = true;
-
     setDraggingOrderId(orderId);
-
-    event.dataTransfer.effectAllowed =
-      "move";
-
-    event.dataTransfer.setData(
-      "text/plain",
-      orderId
-    );
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", orderId);
   };
-
   const handleDragEnd = () => {
     resetDragState();
   };
-
-  const handleDragOver = (
-    event,
-    sectionType
-  ) => {
-    const draggedOrder =
-      orders.find(
-        (order) =>
-          order.id === draggingOrderId
-      );
-
-    if (
-      !canDropIntoSection(
-        draggedOrder,
-        sectionType
-      )
-    ) {
-      event.dataTransfer.dropEffect =
-        "none";
-
+  const handleDragOver = (event, sectionType) => {
+    const draggedOrder = orders.find((order) => order.id === draggingOrderId);
+    if (!canDropIntoSection(draggedOrder, sectionType)) {
+      event.dataTransfer.dropEffect = "none";
       setDragOverSection(null);
       return;
     }
-
     event.preventDefault();
-
-    event.dataTransfer.dropEffect =
-      "move";
-
-    setDragOverSection(
-      sectionType
-    );
+    event.dataTransfer.dropEffect = "move";
+    setDragOverSection(sectionType);
   };
-
-  const handleDrop = async (
-    event,
-    targetType
-  ) => {
+  const handleDrop = async (event, targetType) => {
     event.preventDefault();
-
     const orderId =
-      event.dataTransfer.getData(
-        "text/plain"
-      ) || draggingOrderId;
-
+      event.dataTransfer.getData("text/plain") || draggingOrderId;
     if (!orderId) {
       resetDragState();
       return;
     }
-
-    const selectedOrder =
-      orders.find(
-        (order) =>
-          order.id === orderId
-      );
-
+    const selectedOrder = orders.find((order) => order.id === orderId);
     if (!selectedOrder) {
       resetDragState();
       return;
     }
-
-    /*
-      Block unpackaged orders from
-      entering Send Now.
-    */
-    if (
-      !canDropIntoSection(
-        selectedOrder,
-        targetType
-      )
-    ) {
+    // Block unpackaged orders from entering Send Now.
+    if (!canDropIntoSection(selectedOrder, targetType)) {
       resetDragState();
       return;
     }
-
-    const currentType =
-      getResolvedOrderType(
-        selectedOrder
-      );
-
+    const currentType = getResolvedOrderType(selectedOrder);
     if (currentType !== targetType) {
-      const savedOverrides =
-        getSavedObject(
-          ORDER_TYPE_STORAGE_KEY
-        );
-
-      savedOverrides[orderId] =
-        targetType;
-
-      saveObject(
-        ORDER_TYPE_STORAGE_KEY,
-        savedOverrides
-      );
-
-      setOrders(
-        (currentOrders) =>
-          currentOrders.map(
-            (order) =>
-              order.id === orderId
-                ? {
-                    ...order,
-                    manualType:
-                      targetType
-                  }
-                : order
-          )
-      );
-    }
-
-    /*
-      A fully packaged order dropped
-      into Send Now calls this function.
-
-      It is blank for now.
-    */
-    if (
-      targetType === "send_now"
-    ) {
-      await approveOrder(
-        selectedOrder
-      );
-    }
-
-    resetDragState();
-  };
-
-  const renderOrderCard = (
-    section
-  ) => {
-    const isDragOver =
-      dragOverSection ===
-      section.type;
-
-    const draggedOrder =
-      orders.find(
-        (order) =>
-          order.id ===
-          draggingOrderId
-      );
-
-    const isBlockedSendNowTarget =
-      Boolean(
-        draggingOrderId &&
-        section.type ===
-          "send_now" &&
-        draggedOrder &&
-        !isOrderFullyPackaged(
-          draggedOrder
+      const savedOverrides = getSavedObject(ORDER_TYPE_STORAGE_KEY);
+      savedOverrides[orderId] = targetType;
+      saveObject(ORDER_TYPE_STORAGE_KEY, savedOverrides);
+      setOrders((currentOrders) =>
+        currentOrders.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                manualType: targetType
+              }
+            : order
         )
       );
-
+    }
+    // A fully packaged order dropped into Send Now calls this blank function.
+    if (targetType === "send_now") {
+      await approveOrder(selectedOrder);
+    }
+    resetDragState();
+  };
+  const renderOrderCard = (section) => {
+    const isDragOver = dragOverSection === section.type;
+    const draggedOrder = orders.find(
+      (order) => order.id === draggingOrderId
+    );
+    const isBlockedSendNowTarget = Boolean(
+      draggingOrderId &&
+      section.type === "send_now" &&
+      draggedOrder &&
+      !isOrderFullyPackaged(draggedOrder)
+    );
+    const isSendNowSection = section.type === "send_now";
+    const tableColumnCount = isSendNowSection ? 4 : 3;
     return (
       <section
         className={`
           order-card
           ${section.type}
-          ${
-            isDragOver
-              ? "drag-over"
-              : ""
-          }
-          ${
-            isBlockedSendNowTarget
-              ? "drop-blocked"
-              : ""
-          }
+          ${isDragOver ? "drag-over" : ""}
+          ${isBlockedSendNowTarget ? "drop-blocked" : ""}
         `}
         key={section.type}
-        onDragOver={(event) =>
-          handleDragOver(
-            event,
-            section.type
-          )
-        }
-        onDrop={(event) =>
-          handleDrop(
-            event,
-            section.type
-          )
-        }
+        onDragOver={(event) => handleDragOver(event, section.type)}
+        onDrop={(event) => handleDrop(event, section.type)}
       >
         <div className="card-heading">
-          <h1 className="section-title">
-            {section.title}
-          </h1>
-
-          <span className="order-count">
-            {section.orders.length}
-          </span>
+          <h1 className="section-title">{section.title}</h1>
+          <span className="order-count">{section.orders.length}</span>
         </div>
-
         {isBlockedSendNowTarget && (
           <div className="drop-warning">
-            Complete all packaging before
-            moving the order to Send Now.
+            Complete all packaging before moving the order to Send Now.
           </div>
         )}
-
         <div className="table-wrapper">
           <table className="main-table">
             <thead>
@@ -1343,308 +593,172 @@ function App() {
                 <th>Dealer</th>
                 <th>Remark</th>
                 <th>Packaging</th>
+                {isSendNowSection && <th>Approval</th>}
               </tr>
             </thead>
-
             <tbody>
-              {section.orders.length ===
-              0 ? (
+              {section.orders.length === 0 ? (
                 <tr className="empty-orders">
-                  <td colSpan="3">
-                    {draggingOrderId &&
-                    !isBlockedSendNowTarget
+                  <td colSpan={tableColumnCount}>
+                    {draggingOrderId && !isBlockedSendNowTarget
                       ? `Drop order into ${section.title}`
                       : `No ${section.title} orders`}
                   </td>
                 </tr>
               ) : (
-                section.orders.map(
-                  (order) => {
-                    const isOpen =
-                      openRows.includes(
-                        order.id
-                      );
-
-                    const orderType =
-                      getResolvedOrderType(
-                        order
-                      );
-
-                    const isNew =
-                      newOrderIds.includes(
-                        order.id
-                      );
-
-                    const isDragging =
-                      draggingOrderId ===
-                      order.id;
-
-                    return (
-                      <Fragment
-                        key={order.id}
+                section.orders.map((order) => {
+                  const isOpen = openRows.includes(order.id);
+                  const orderType = getResolvedOrderType(order);
+                  const isNew = newOrderIds.includes(order.id);
+                  const isDragging = draggingOrderId === order.id;
+                  const canApprove = isSendNowSection && isOrderFullyPackaged(order);
+                  return (
+                    <Fragment key={order.id}>
+                      <tr
+                        className={`
+                          order-row
+                          ${orderType}
+                          ${isOpen ? "is-open" : "is-closed"}
+                          ${isNew ? "is-new" : ""}
+                          ${isDragging ? "is-dragging" : ""}
+                        `}
+                        draggable
+                        onDragStart={(event) =>
+                          handleDragStart(event, order.id)
+                        }
+                        onDragEnd={handleDragEnd}
+                        onClick={() => {
+                          if (justDraggedRef.current) {
+                            return;
+                          }
+                          toggleRow(order.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            toggleRow(order.id);
+                          }
+                        }}
+                        tabIndex={0}
                       >
-                        <tr
-                          className={`
-                            order-row
-                            ${orderType}
-                            ${
-                              isOpen
-                                ? "is-open"
-                                : "is-closed"
-                            }
-                            ${
-                              isNew
-                                ? "is-new"
-                                : ""
-                            }
-                            ${
-                              isDragging
-                                ? "is-dragging"
-                                : ""
-                            }
-                          `}
-                          draggable
-                          onDragStart={(
-                            event
-                          ) =>
-                            handleDragStart(
-                              event,
-                              order.id
-                            )
-                          }
-                          onDragEnd={
-                            handleDragEnd
-                          }
-                          onClick={() => {
-                            if (
-                              justDraggedRef.current
-                            ) {
-                              return;
-                            }
-
-                            toggleRow(
-                              order.id
-                            );
-                          }}
-                          onKeyDown={(
-                            event
-                          ) => {
-                            if (
-                              event.key ===
-                                "Enter" ||
-                              event.key ===
-                                " "
-                            ) {
-                              event.preventDefault();
-
-                              toggleRow(
-                                order.id
-                              );
-                            }
-                          }}
-                          tabIndex={0}
-                        >
-                          <td>
-                            <div className="dealer-line">
-                              <span className="order-name">
-                                {order.name}
-                              </span>
-
-                              {isNew && (
-                                <span className="new-badge">
-                                  NEW
+                        <td>
+                          <div className="dealer-line">
+                            <span className="order-name">{order.name}</span>
+                            {isNew && <span className="new-badge">NEW</span>}
+                          </div>
+                          {order.date && (
+                            <div className="order-date">{order.date}</div>
+                          )}
+                        </td>
+                        <td className="remark-cell">{order.remark || "-"}</td>
+                        <td>
+                          {orderChanges[order.id]?.length > 0 ? (
+                            <div className="change-status-list">
+                              {orderChanges[order.id].map((change) => (
+                                <span
+                                  key={`${change.itemId}-${change.type}`}
+                                  className={`change-status ${change.type}`}
+                                  title={`${change.product_code}: ${change.product_name}`}
+                                >
+                                  <strong>{change.label}</strong>
+                                  <small>{change.product_code}</small>
                                 </span>
-                              )}
+                              ))}
                             </div>
-
-                            {order.date && (
-                              <div className="order-date">
-                                {order.date}
-                              </div>
-                            )}
+                          ) : (
+                            <span className={`pack-status ${getPackagingClass(order.items)}`}>
+                              {getPackagingStatus(order.items)}
+                            </span>
+                          )}
+                        </td>
+                        {isSendNowSection && (
+                          <td className="approval-cell">
+                            <button
+                              type="button"
+                              className="approval-button"
+                              disabled={!canApprove}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                approveOrder(order);
+                              }}
+                            >
+                              Approve
+                            </button>
                           </td>
-
-                          <td className="remark-cell">
-                            {order.remark || "-"}
-                          </td>
-
-                          <td>
-                            {orderChanges[
-                              order.id
-                            ]?.length > 0 ? (
-                              <div className="change-status-list">
-                                {orderChanges[
-                                  order.id
-                                ].map(
-                                  (change) => (
-                                    <span
-                                      key={
-                                        `${change.itemId}-` +
-                                        `${change.type}`
-                                      }
-                                      className={`
-                                        change-status
-                                        ${change.type}
-                                      `}
-                                      title={
-                                        `${change.product_code}: ` +
-                                        `${change.product_name}`
-                                      }
-                                    >
-                                      <strong>
-                                        {
-                                          change.label
-                                        }
-                                      </strong>
-
-                                      <small>
-                                        {
-                                          change.product_code
-                                        }
-                                      </small>
-                                    </span>
-                                  )
-                                )}
-                              </div>
-                            ) : (
-                              <span
-                                className={`
-                                  pack-status
-                                  ${getPackagingClass(
-                                    order.items
-                                  )}
-                                `}
-                              >
-                                {getPackagingStatus(
-                                  order.items
-                                )}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-
-                        {isOpen && (
-                          <tr
-                            className={`
-                              detail
-                              ${orderType}
-                            `}
-                          >
-                            <td colSpan="3">
-                              <div className="item-container">
-                                <table className="item-table">
-                                  <thead>
+                        )}
+                      </tr>
+                      {isOpen && (
+                        <tr className={`detail ${orderType}`}>
+                          <td colSpan={tableColumnCount}>
+                            <div className="item-container">
+                              <table className="item-table">
+                                <thead>
+                                  <tr>
+                                    <th>Code</th>
+                                    <th>Description</th>
+                                    <th>Quantity</th>
+                                    <th>Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {order.items.length === 0 ? (
                                     <tr>
-                                      <th>
-                                        Code
-                                      </th>
-
-                                      <th>
-                                        Description
-                                      </th>
-
-                                      <th>
-                                        Quantity
-                                      </th>
-
-                                      <th>
-                                        Status
-                                      </th>
+                                      <td colSpan="4" className="empty-items">
+                                        No items found
+                                      </td>
                                     </tr>
-                                  </thead>
-
-                                  <tbody>
-                                    {order.items
-                                      .length ===
-                                    0 ? (
-                                      <tr>
-                                        <td
-                                          colSpan="4"
-                                          className="empty-items"
-                                        >
-                                          No items found
+                                  ) : (
+                                    order.items.map((item, itemIndex) => (
+                                      <tr key={item.storageKey}>
+                                        <td className="product-code">
+                                          {item.product_code}
+                                        </td>
+                                        <td className="product-description">
+                                          {item.product_name}
+                                        </td>
+                                        <td className="quantity-cell">
+                                          {item.quantity}
+                                        </td>
+                                        <td className="pack-button-cell">
+                                          <button
+                                            type="button"
+                                            className={
+                                              item.packaged
+                                                ? "packed"
+                                                : "not-packed"
+                                            }
+                                            disabled={updatingItemKeys.includes(
+                                              item.storageKey
+                                            )}
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              updateItem(order.id, itemIndex);
+                                            }}
+                                          >
+                                            {updatingItemKeys.includes(
+                                              item.storageKey
+                                            )
+                                              ? "Saving..."
+                                              : item.packaged
+                                                ? "✓ Packed"
+                                                : "Pack"}
+                                          </button>
                                         </td>
                                       </tr>
-                                    ) : (
-                                      order.items.map(
-                                        (
-                                          item,
-                                          itemIndex
-                                        ) => (
-                                          <tr
-                                            key={
-                                              item.storageKey
-                                            }
-                                          >
-                                            <td className="product-code">
-                                              {
-                                                item.product_code
-                                              }
-                                            </td>
-
-                                            <td className="product-description">
-                                              {
-                                                item.product_name
-                                              }
-                                            </td>
-
-                                            <td className="quantity-cell">
-                                              {
-                                                item.quantity
-                                              }
-                                            </td>
-
-                                            <td className="pack-button-cell">
-                                              <button
-                                                type="button"
-                                                className={
-                                                  item.packaged
-                                                    ? "packed"
-                                                    : "not-packed"
-                                                }
-                                                disabled={
-                                                  updatingItemKeys.includes(
-                                                    item.storageKey
-                                                  )
-                                                }
-                                                onClick={(
-                                                  event
-                                                ) => {
-                                                  event.stopPropagation();
-
-                                                  updateItem(
-                                                    order.id,
-                                                    itemIndex
-                                                  );
-                                                }}
-                                              >
-                                                {updatingItemKeys.includes(
-                                                  item.storageKey
-                                                )
-                                                  ? "Saving..."
-                                                  : item.packaged
-                                                    ? "✓ Packed"
-                                                    : "Pack"}
-                                              </button>
-                                            </td>
-                                          </tr>
-                                        )
-                                      )
-                                    )}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-
-                        <tr className="order-spacer">
-                          <td colSpan="3"></td>
+                                    ))
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
                         </tr>
-                      </Fragment>
-                    );
-                  }
-                )
+                      )}
+                      <tr className="order-spacer">
+                        <td colSpan={tableColumnCount}></td>
+                      </tr>
+                    </Fragment>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -1652,50 +766,22 @@ function App() {
       </section>
     );
   };
-
-  /*
-    Send Now is separated from the
-    normal card grid.
-  */
-  const regularSections =
-    orderSectionsWithOrders.filter(
-      (section) =>
-        section.type !== "send_now"
-    );
-
-  const sendNowSection =
-    orderSectionsWithOrders.find(
-      (section) =>
-        section.type === "send_now"
-    );
-
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <h2>Packaging Queue</h2>
-
           <p className="page-description">
-            Click an order to expand it.
-            Drag a fully packaged order
-            into the fixed Send Now card.
+            Click an order to expand it. Drag an order between the cards.
           </p>
         </div>
-
         <div className="header-actions">
           <PwaInstallButton />
-
           <div className="live-panel">
             <div className="live-line">
               <span className="live-dot"></span>
-
-              <span>
-                {loading
-                  ? "Connecting"
-                  : "Live"}
-              </span>
+              <span>{loading ? "Connecting" : "Live"}</span>
             </div>
-
             <div className="last-updated">
               {lastUpdated
                 ? `Updated ${lastUpdated.toLocaleTimeString()}`
@@ -1704,31 +790,10 @@ function App() {
           </div>
         </div>
       </div>
-
       <div className="card-grid">
-        {regularSections.map(
-          renderOrderCard
-        )}
+        {orderSectionsWithOrders.map(renderOrderCard)}
       </div>
-
-      {sendNowSection && (
-        <div
-          className={`
-            fixed-send-now-dock
-            ${
-              draggingOrderId
-                ? "drag-active"
-                : ""
-            }
-          `}
-        >
-          {renderOrderCard(
-            sendNowSection
-          )}
-        </div>
-      )}
     </div>
   );
 }
-
 export default App;
