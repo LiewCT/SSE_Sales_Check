@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import axios from "axios";
 import "./App.css";
 import PwaInstallButton from "./PwaInstallButton";
-const API_BASE_URL = "http://localhost:5000";
+const API_BASE_URL = "https://sse-sales-check.onrender.com";
 const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
 const PACKAGING_STATUS_API_URL = `${API_BASE_URL}/packaging-status`;
 const POLL_INTERVAL_MS = 3000;
