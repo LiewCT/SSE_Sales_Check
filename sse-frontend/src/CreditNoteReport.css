@@ -1,0 +1,324 @@
+.credit-report-page {
+  min-height: 100vh;
+  padding: 24px;
+  background: #f4f7fb;
+  box-sizing: border-box;
+}
+
+.credit-report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.credit-report-title {
+  margin: 0 0 6px;
+  color: #0f172a;
+}
+
+.credit-report-subtitle {
+  margin: 0;
+  color: #64748b;
+}
+
+.credit-report-back-button {
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.credit-report-back-button:hover {
+  background: #f8fafc;
+}
+
+.credit-report-filter-card {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 18px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+
+.credit-report-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.credit-report-label {
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.credit-report-input {
+  min-width: 180px;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 15px;
+  outline: none;
+}
+
+.credit-report-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.credit-report-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.credit-report-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.credit-report-generate-button,
+.credit-report-export-button {
+  min-height: 42px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.credit-report-generate-button {
+  background: #2563eb;
+}
+
+.credit-report-generate-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.credit-report-export-button {
+  background: #15803d;
+}
+
+.credit-report-export-button:hover:not(:disabled) {
+  background: #166534;
+}
+
+.credit-report-generate-button:disabled,
+.credit-report-export-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.credit-report-info-message {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.credit-report-error-message {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.credit-report-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.credit-report-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.credit-report-summary-item span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.credit-report-summary-item strong {
+  color: #0f172a;
+  font-size: 21px;
+}
+
+.credit-report-table-wrapper {
+  overflow-x: auto;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+
+.credit-report-table {
+  width: 100%;
+  min-width: 1050px;
+  border-collapse: collapse;
+}
+
+.credit-report-table th {
+  padding: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #0f172a;
+  color: #ffffff;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.credit-report-table td {
+  padding: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+  color: #334155;
+  vertical-align: top;
+}
+
+.credit-report-group-start td {
+  border-top: 4px solid #64748b;
+}
+
+.credit-report-group-0 td {
+  background: #eff6ff;
+}
+
+.credit-report-group-1 td {
+  background: #f0fdf4;
+}
+
+.credit-report-group-2 td {
+  background: #fff7ed;
+}
+
+.credit-report-group-3 td {
+  background: #faf5ff;
+}
+
+.credit-report-group-4 td {
+  background: #fefce8;
+}
+
+.credit-report-group-5 td {
+  background: #f0fdfa;
+}
+
+.credit-report-group-0:hover td,
+.credit-report-group-1:hover td,
+.credit-report-group-2:hover td,
+.credit-report-group-3:hover td,
+.credit-report-group-4:hover td,
+.credit-report-group-5:hover td {
+  filter: brightness(0.97);
+}
+
+.credit-report-empty-cell {
+  padding: 32px !important;
+  background: #ffffff !important;
+  color: #64748b !important;
+  text-align: center;
+}
+
+.credit-report-date {
+  white-space: nowrap;
+}
+
+.credit-report-product-code {
+  color: #1d4ed8 !important;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.credit-report-quantity {
+  font-weight: 700;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .credit-report-summary {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .credit-report-page {
+    padding: 14px;
+  }
+
+  .credit-report-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .credit-report-back-button {
+    width: 100%;
+  }
+
+  .credit-report-filter-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .credit-report-field,
+  .credit-report-input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .credit-report-buttons {
+    flex-direction: column;
+  }
+
+  .credit-report-generate-button,
+  .credit-report-export-button {
+    width: 100%;
+  }
+
+  .credit-report-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+.credit-report-short-export-button {
+  min-height: 42px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: #7c3aed;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.credit-report-short-export-button:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+.credit-report-short-export-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.credit-report-generate-button,
+.credit-report-export-button,
+.credit-report-short-export-button {
+  width: 100%;
+}

@@ -2,9 +2,11 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import axios from "axios";
 import "./App.css";
 import PwaInstallButton from "./PwaInstallButton";
+import CreditNoteReport from "./CreditNoteReport";
 const API_BASE_URL = "https://sse-sales-check.onrender.com";
 const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
 const PACKAGING_STATUS_API_URL = `${API_BASE_URL}/packaging-status`;
+const APPROVE_ORDER_API_URL = `${API_BASE_URL}/approve-order`;
 const POLL_INTERVAL_MS = 3000;
 const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
 const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
@@ -177,6 +179,7 @@ const mergeOrderChanges = (currentChanges, detectedChanges) => {
   return nextChanges;
 };
 function App() {
+  const [currentPage, setCurrentPage] = useState("packaging");
   const [orders, setOrders] = useState([]);
   const [openRows, setOpenRows] = useState([]);
   const [newOrderIds, setNewOrderIds] = useState([]);
@@ -186,6 +189,7 @@ function App() {
   const [dragOverSection, setDragOverSection] = useState(null);
   const [orderChanges, setOrderChanges] = useState(() => getSavedObject(ORDER_CHANGES_STORAGE_KEY));
   const [updatingItemKeys, setUpdatingItemKeys] = useState([]);
+  const [approvingOrderIds, setApprovingOrderIds] = useState([]);
   const serverSnapshotRef = useRef(getSavedObject(SERVER_SNAPSHOT_STORAGE_KEY));
   const isFetchingRef = useRef(false);
   const justDraggedRef = useRef(false);
@@ -284,14 +288,20 @@ function App() {
   }, []);
   // Automatically request updates every three seconds.
   useEffect(() => {
+    if (currentPage !== "packaging") {
+      return undefined;
+    }
+
     fetchApprovals(false);
+
     const intervalId = setInterval(() => {
       fetchApprovals(true);
     }, POLL_INTERVAL_MS);
+
     return () => {
       clearInterval(intervalId);
     };
-  }, [fetchApprovals]);
+  }, [currentPage, fetchApprovals]);
   // Build each card while keeping the card order fixed.
   const orderSectionsWithOrders = useMemo(() => {
     return ORDER_SECTIONS.map((section) => {
@@ -480,9 +490,47 @@ function App() {
     // Send Now only accepts fully packaged orders.
     return isOrderFullyPackaged(order);
   };
-  // Approval action will be added here later.
-  const approveOrder = async () => {
-    // Leave blank first.
+  const approveOrder = async (order) => {
+    if (!order || !isOrderFullyPackaged(order)) {
+      return;
+    }
+    if (approvingOrderIds.includes(order.id)) {
+      return;
+    }
+    const selectedItems = order.items
+      .map((item) => String(item.itemId).trim())
+      .filter(Boolean);
+    if (selectedItems.length === 0) {
+      window.alert("No items were found for approval.");
+      return;
+    }
+    setApprovingOrderIds((currentIds) => [
+      ...currentIds,
+      order.id
+    ]);
+    try {
+      const response = await axios.post(APPROVE_ORDER_API_URL, {
+        sale_id: String(order.id),
+        selected_items: selectedItems,
+        sale_remark: String(order.remark || "")
+      });
+      window.alert(
+        response.data?.message ||
+        "Order approved successfully."
+      );
+      await fetchApprovals(true);
+    } catch (error) {
+      console.error("Cannot approve order", error);
+      window.alert(
+        error.response?.data?.error ||
+        error.response?.data?.details ||
+        "Unable to approve the order. Please try again."
+      );
+    } finally {
+      setApprovingOrderIds((currentIds) =>
+        currentIds.filter((id) => id !== order.id)
+      );
+    }
   };
   const resetDragState = () => {
     setDraggingOrderId(null);
@@ -546,10 +594,6 @@ function App() {
         )
       );
     }
-    // A fully packaged order dropped into Send Now calls this blank function.
-    if (targetType === "send_now") {
-      await approveOrder(selectedOrder);
-    }
     resetDragState();
   };
   const renderOrderCard = (section) => {
@@ -611,7 +655,11 @@ function App() {
                   const orderType = getResolvedOrderType(order);
                   const isNew = newOrderIds.includes(order.id);
                   const isDragging = draggingOrderId === order.id;
-                  const canApprove = isSendNowSection && isOrderFullyPackaged(order);
+                  const isApproving = approvingOrderIds.includes(order.id);
+                  const canApprove =
+                    isSendNowSection &&
+                    isOrderFullyPackaged(order) &&
+                    !isApproving;
                   return (
                     <Fragment key={order.id}>
                       <tr
@@ -682,7 +730,7 @@ function App() {
                                 approveOrder(order);
                               }}
                             >
-                              Approve
+                              {isApproving ? "Approving..." : "Approve"}
                             </button>
                           </td>
                         )}
@@ -766,6 +814,15 @@ function App() {
       </section>
     );
   };
+
+  if (currentPage === "credit-note-report") {
+    return (
+      <CreditNoteReport
+        onBack={() => setCurrentPage("packaging")}
+      />
+    );
+  }
+
   return (
     <div className="page">
       <div className="page-header">
@@ -776,6 +833,22 @@ function App() {
           </p>
         </div>
         <div className="header-actions">
+          <button
+            type="button"
+            onClick={() => setCurrentPage("credit-note-report")}
+            style={{
+              padding: "10px 16px",
+              border: "none",
+              borderRadius: "8px",
+              background: "#2563eb",
+              color: "#ffffff",
+              cursor: "pointer",
+              fontWeight: "700"
+            }}
+          >
+            Credits Note Report
+          </button>
+
           <PwaInstallButton />
           <div className="live-panel">
             <div className="live-line">
