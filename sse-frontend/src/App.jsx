@@ -223,6 +223,7 @@ function App() {
           const pendingStatus = pendingPackagingRef.current.get(storageKey);
           return {
             itemId,
+            product_id: String(item.product_id || ""),
             product_code: item.code || "-",
             product_name: item.name || "-",
             quantity: Number.isFinite(quantity) ? quantity : 0,
@@ -498,10 +499,10 @@ function App() {
       return;
     }
     const selectedItems = order.items
-      .map((item) => String(item.itemId).trim())
+      .map((item) => String(item.product_id).trim())
       .filter(Boolean);
     if (selectedItems.length === 0) {
-      window.alert("No items were found for approval.");
+      window.alert("No product IDs were found for approval.");
       return;
     }
     setApprovingOrderIds((currentIds) => [
