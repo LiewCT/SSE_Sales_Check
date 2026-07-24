@@ -7,7 +7,7 @@ import {
 import "./CreditNoteReport.css";
 
 const API_BASE_URL =
-  "http://localhost:5000";
+  "https://sse-sales-check.onrender.com";
 
 const CREDIT_NOTE_REPORT_API_URL =
   `${API_BASE_URL}/credit-note-report`;
