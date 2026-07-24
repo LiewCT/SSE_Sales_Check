@@ -755,58 +755,21 @@ def approvals():
                 items = []
                 used_item_ids = {}
 
-                for item_index, record in enumerate(
-                    records
-                ):
-                    product_id = str(
-                        record.get(
-                            "sale_product"
-                        )
-                        or record.get(
-                            "product_id"
-                        )
-                        or ""
-                    ).strip()
-
-                    product_code = str(
-                        record.get(
-                            "product_code",
-                            "-"
-                        )
-                    )
-
-                    item_id = (
-                        make_unique_item_id(
-                            record,
-                            item_index,
-                            used_item_ids
-                        )
-                    )
-
-                    quantity = to_number(
-                        record.get(
-                            "sale_qty"
-                        )
-                    )
-
-                    packaged = (
-                        get_shared_packaging_status(
-                            connection,
-                            str(sale_id),
-                            item_id,
-                            product_code,
-                            quantity
-                        )
-                    )
+                for item_index, record in enumerate(records):
+                    product_id = str(record.get("sale_product").strip())
+                    product_code = str(record.get("product_code", "-"))
+                    product_name = str(record.get("product_name", "-"))
+                    product_description = str(record.get("prproduct_descriptionoduct_name", "-"))
+                    item_id = make_unique_item_id(record, item_index, used_item_ids)
+                    quantity = to_number(record.get("sale_qty"))
+                    packaged = get_shared_packaging_status(connection, str(sale_id), item_id, product_code, quantity)
 
                     items.append({
                         "id": item_id,
                         "product_id": product_id,
                         "code": product_code,
-                        "name": record.get(
-                            "product_name",
-                            "-"
-                        ),
+                        "name": product_name,
+                        "product_description": product_description,
                         "qty": quantity,
                         "packaged": packaged
                     })

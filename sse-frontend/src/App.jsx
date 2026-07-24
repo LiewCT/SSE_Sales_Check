@@ -4,6 +4,7 @@ import "./App.css";
 import PwaInstallButton from "./PwaInstallButton";
 import CreditNoteReport from "./CreditNoteReport";
 const API_BASE_URL = "https://sse-sales-check.onrender.com";
+// const API_BASE_URL = "http://localhost:5000";
 const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
 const PACKAGING_STATUS_API_URL = `${API_BASE_URL}/packaging-status`;
 const APPROVE_ORDER_API_URL = `${API_BASE_URL}/approve-order`;
@@ -209,7 +210,6 @@ function App() {
       const savedTypeOverrides = getSavedObject(ORDER_TYPE_STORAGE_KEY);
       const formattedOrders = responseOrders.map((order, orderIndex) => {
         const items = Array.isArray(order.items) ? order.items : [];
-        // A stable order ID from the backend is recommended.
         const orderId = String(
           order.id ||
           order.approval_id ||
@@ -249,10 +249,8 @@ function App() {
         ? detectOrderChanges(previousSnapshot, currentSnapshot)
         : {};
       const fetchedOrderIds = formattedOrders.map((order) => order.id);
-      // Save item and quantity change alerts.
       setOrderChanges((currentChanges) => {
         let nextChanges = mergeOrderChanges(currentChanges, detectedChanges);
-        // Remove changes belonging to deleted orders.
         nextChanges = Object.fromEntries(
           Object.entries(nextChanges).filter(([orderId]) => fetchedOrderIds.includes(orderId))
         );
