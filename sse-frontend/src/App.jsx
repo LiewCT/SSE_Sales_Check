@@ -513,10 +513,7 @@ function App() {
         selected_items: selectedItems,
         sale_remark: String(order.remark || "")
       });
-      window.alert(
-        response.data?.message ||
-        "Order approved successfully."
-      );
+      
       await fetchApprovals(true);
     } catch (error) {
       console.error("Cannot approve order", error);
