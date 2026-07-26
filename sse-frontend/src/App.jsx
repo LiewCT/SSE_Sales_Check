@@ -9,6 +9,9 @@ const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
 const PACKAGING_STATUS_API_URL = `${API_BASE_URL}/packaging-status`;
 const APPROVE_ORDER_API_URL = `${API_BASE_URL}/approve-order`;
 const POLL_INTERVAL_MS = 3000;
+const CARD_HEIGHT_PX = 560;
+const AUTO_SCROLL_EDGE_PX = 90;
+const AUTO_SCROLL_MAX_SPEED = 50;
 const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
 const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
 const SERVER_SNAPSHOT_STORAGE_KEY = "packaging-server-snapshot";
@@ -196,11 +199,20 @@ function App() {
   const justDraggedRef = useRef(false);
   const notificationAudioRef=useRef(null);
   const notifiedOrderIdsRef=useRef(new Set());
+  const autoScrollFrameRef = useRef(null);
+  const dragPointerYRef = useRef(null);
+  const dragScrollContainerRef = useRef(null);
 
 useEffect(()=>{
   notificationAudioRef.current=new Audio("/normal_notification.wav");
   notificationAudioRef.current.preload="auto";
   return()=>notificationAudioRef.current?.pause();
+},[]);
+
+useEffect(()=>()=>{
+  if(autoScrollFrameRef.current){
+    cancelAnimationFrame(autoScrollFrameRef.current);
+  }
 },[]);
 
 const playNotificationSound=useCallback(()=>{
@@ -558,7 +570,49 @@ const playNotificationSound=useCallback(()=>{
       );
     }
   };
+  const stopDragAutoScroll = () => {
+    if (autoScrollFrameRef.current) {
+      cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = null;
+    }
+    dragPointerYRef.current = null;
+    dragScrollContainerRef.current = null;
+  };
+  const runDragAutoScroll = () => {
+    const pointerY = dragPointerYRef.current;
+    if (pointerY === null) {
+      autoScrollFrameRef.current = null;
+      return;
+    }
+    const getSpeed = (distance) => {
+      const ratio = Math.min(1, Math.max(0, distance / AUTO_SCROLL_EDGE_PX));
+      return Math.ceil(AUTO_SCROLL_MAX_SPEED * ratio);
+    };
+    const container = dragScrollContainerRef.current;
+    if (container) {
+      const rect = container.getBoundingClientRect();
+      if (pointerY >= rect.top - AUTO_SCROLL_EDGE_PX && pointerY < rect.top + AUTO_SCROLL_EDGE_PX) {
+        container.scrollTop -= getSpeed(rect.top + AUTO_SCROLL_EDGE_PX - pointerY);
+      } else if (pointerY <= rect.bottom + AUTO_SCROLL_EDGE_PX && pointerY > rect.bottom - AUTO_SCROLL_EDGE_PX) {
+        container.scrollTop += getSpeed(pointerY - (rect.bottom - AUTO_SCROLL_EDGE_PX));
+      }
+    }
+    if (pointerY < AUTO_SCROLL_EDGE_PX) {
+      window.scrollBy(0, -getSpeed(AUTO_SCROLL_EDGE_PX - pointerY));
+    } else if (pointerY > window.innerHeight - AUTO_SCROLL_EDGE_PX) {
+      window.scrollBy(0, getSpeed(pointerY - (window.innerHeight - AUTO_SCROLL_EDGE_PX)));
+    }
+    autoScrollFrameRef.current = requestAnimationFrame(runDragAutoScroll);
+  };
+  const updateDragAutoScroll = (event) => {
+    dragPointerYRef.current = event.clientY;
+    dragScrollContainerRef.current = event.currentTarget.querySelector(".table-wrapper");
+    if (!autoScrollFrameRef.current) {
+      autoScrollFrameRef.current = requestAnimationFrame(runDragAutoScroll);
+    }
+  };
   const resetDragState = () => {
+    stopDragAutoScroll();
     setDraggingOrderId(null);
     setDragOverSection(null);
     // Ignore the accidental click generated immediately after drag.
@@ -576,6 +630,7 @@ const playNotificationSound=useCallback(()=>{
     resetDragState();
   };
   const handleDragOver = (event, sectionType) => {
+    updateDragAutoScroll(event);
     const draggedOrder = orders.find((order) => order.id === draggingOrderId);
     if (!canDropIntoSection(draggedOrder, sectionType)) {
       event.dataTransfer.dropEffect = "none";
@@ -643,6 +698,12 @@ const playNotificationSound=useCallback(()=>{
           ${isDragOver ? "drag-over" : ""}
           ${isBlockedSendNowTarget ? "drop-blocked" : ""}
         `}
+        style={{
+          height: `${CARD_HEIGHT_PX}px`,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden"
+        }}
         key={section.type}
         onDragOver={(event) => handleDragOver(event, section.type)}
         onDrop={(event) => handleDrop(event, section.type)}
@@ -656,7 +717,7 @@ const playNotificationSound=useCallback(()=>{
             Complete all packaging before moving the order to Send Now.
           </div>
         )}
-        <div className="table-wrapper">
+        <div className="table-wrapper" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
           <table className="main-table">
             <thead>
               <tr>
