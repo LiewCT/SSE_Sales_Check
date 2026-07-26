@@ -194,6 +194,22 @@ function App() {
   const serverSnapshotRef = useRef(getSavedObject(SERVER_SNAPSHOT_STORAGE_KEY));
   const isFetchingRef = useRef(false);
   const justDraggedRef = useRef(false);
+  const notificationAudioRef=useRef(null);
+  const notifiedOrderIdsRef=useRef(new Set());
+
+useEffect(()=>{
+  notificationAudioRef.current=new Audio("/bubble_pop_notification.wav");
+  notificationAudioRef.current.preload="auto";
+  return()=>notificationAudioRef.current?.pause();
+},[]);
+
+const playNotificationSound=useCallback(()=>{
+  const audio=notificationAudioRef.current;
+  if(!audio)return;
+  audio.currentTime=0;
+  audio.play().catch(error=>console.warn("Notification sound blocked",error));
+},[]);
+
   // Keep an optimistic value while the PUT request is running to prevent polling from changing the button back.
   const pendingPackagingRef = useRef(new Map());
   const fetchApprovals = useCallback(async (silent = false) => {
@@ -248,6 +264,7 @@ function App() {
       const detectedChanges = hasPreviousSnapshot
         ? detectOrderChanges(previousSnapshot, currentSnapshot)
         : {};
+      let shouldPlayNotification=Object.keys(detectedChanges).length>0;
       const fetchedOrderIds = formattedOrders.map((order) => order.id);
       setOrderChanges((currentChanges) => {
         let nextChanges = mergeOrderChanges(currentChanges, detectedChanges);
@@ -267,12 +284,25 @@ function App() {
       } else {
         const seenOrderIds = getSavedArray(SEEN_ORDERS_STORAGE_KEY);
         const newlyAddedIds = fetchedOrderIds.filter((id) => !seenOrderIds.includes(id));
+        const unnotifiedIds=newlyAddedIds.filter(
+          id=>!notifiedOrderIdsRef.current.has(id)
+        );
+
+        if(unnotifiedIds.length>0){
+          shouldPlayNotification=true;
+          unnotifiedIds.forEach(
+            id=>notifiedOrderIdsRef.current.add(id)
+          );
+        }
         setNewOrderIds((currentNewIds) => [
           ...new Set([
             ...currentNewIds.filter((id) => fetchedOrderIds.includes(id)),
             ...newlyAddedIds
           ])
         ]);
+      }
+      if(shouldPlayNotification){
+        playNotificationSound();
       }
       setOrders(formattedOrders);
       setLastUpdated(new Date());
@@ -284,7 +314,7 @@ function App() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [playNotificationSound]);
   // Automatically request updates every three seconds.
   useEffect(() => {
     if (currentPage !== "packaging") {
