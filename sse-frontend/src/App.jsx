@@ -204,7 +204,7 @@ function App() {
   const dragScrollContainerRef = useRef(null);
 
 useEffect(()=>{
-  notificationAudioRef.current=new Audio("/normal_notification.wav");
+  notificationAudioRef.current=new Audio("/sharp_notification.wav");
   notificationAudioRef.current.preload="auto";
   return()=>notificationAudioRef.current?.pause();
 },[]);
