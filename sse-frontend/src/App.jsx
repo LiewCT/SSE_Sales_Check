@@ -198,7 +198,7 @@ function App() {
   const notifiedOrderIdsRef=useRef(new Set());
 
 useEffect(()=>{
-  notificationAudioRef.current=new Audio("/bubble_pop_notification.wav");
+  notificationAudioRef.current=new Audio("/normal_notification.wav");
   notificationAudioRef.current.preload="auto";
   return()=>notificationAudioRef.current?.pause();
 },[]);
