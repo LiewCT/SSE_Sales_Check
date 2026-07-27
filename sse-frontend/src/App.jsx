@@ -64,8 +64,8 @@ const getOrderType = (remark) => {
   if (value === "sn" || /now/.test(value)) {
     return "send_now";
   }
-  // Any remark containing a number becomes Trip.
-  if (/\d/.test(value)) {
+  // Any remark containing a number or "trip" becomes Trip
+  if (/\d/.test(value) || /trip/.test(value)) {
     return "trip";
   }
   if (value.includes("hold")) {
