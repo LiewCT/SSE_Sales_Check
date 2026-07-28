@@ -278,6 +278,10 @@ const playNotificationSound=useCallback(()=>{
         : {};
       let shouldPlayNotification=Object.keys(detectedChanges).length>0;
       const fetchedOrderIds = formattedOrders.map((order) => order.id);
+      // Keep successful approvals showing as Approving until SSE removes the order.
+      setApprovingOrderIds((currentIds) =>
+        currentIds.filter((orderId) => fetchedOrderIds.includes(orderId))
+      );
       setOrderChanges((currentChanges) => {
         let nextChanges = mergeOrderChanges(currentChanges, detectedChanges);
         nextChanges = Object.fromEntries(
@@ -550,23 +554,21 @@ const playNotificationSound=useCallback(()=>{
       order.id
     ]);
     try {
-      const response = await axios.post(APPROVE_ORDER_API_URL, {
+      await axios.post(APPROVE_ORDER_API_URL, {
         sale_id: String(order.id),
         selected_items: selectedItems,
         sale_remark: String(order.remark || "")
       });
-      
       await fetchApprovals(true);
     } catch (error) {
+      setApprovingOrderIds((currentIds) =>
+        currentIds.filter((id) => id !== order.id)
+      );
       console.error("Cannot approve order", error);
       window.alert(
         error.response?.data?.error ||
         error.response?.data?.details ||
         "Unable to approve the order. Please try again."
-      );
-    } finally {
-      setApprovingOrderIds((currentIds) =>
-        currentIds.filter((id) => id !== order.id)
       );
     }
   };
