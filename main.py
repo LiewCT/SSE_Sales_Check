@@ -91,30 +91,30 @@ def build_approvals_payload():
         "search[regex]":"false"
     }
 
-def build_approved_payload():
+def build_approved_payload(date_start="",date_end=""):
     return {
-        "draw": "1",
-        "start": "0",
-        "length": "100",
-        "search[value]": json.dumps({
-            "date_start": "",
-            "date_end": "",
-            "search": "",
-            "sale_branch": 1,
-            "sale_status": {
-                "Pending": False,
-                "Approved": True,
-                "Rejected": False,
-                "Invoiced": False,
-                "NotInvoiced": False,
-                "PreOrder": False,
-                "Reserved": False
+        "draw":"1",
+        "start":"0",
+        "length":"100",
+        "search[value]":json.dumps({
+            "date_start":date_start,
+            "date_end":date_end,
+            "search":"",
+            "sale_branch":1,
+            "sale_status":{
+                "Pending":False,
+                "Approved":True,
+                "Rejected":False,
+                "Invoiced":False,
+                "NotInvoiced":False,
+                "PreOrder":False,
+                "Reserved":False
             },
-            "sale_dealer": "",
-            "proforma_invoiced": False,
-            "pro_forma_code": ""
+            "sale_dealer":"",
+            "proforma_invoiced":False,
+            "pro_forma_code":""
         }),
-        "search[regex]": "false"
+        "search[regex]":"false"
     }
 
 def build_credit_datatable_payload(length,date_start,date_end):
@@ -495,82 +495,92 @@ def credit_note_report():
         app.logger.exception("Credit Note Report failed")
         return jsonify({"error":"Unable to generate the Credits Note Report.","details":str(error)}),500
 
-@app.route(
-    "/open-invoices",
-    methods=["GET"]
-)
+@app.route("/open-invoices",methods=["POST"])
 def open_invoices():
-    session = build_sse_session()
-    headers = build_sse_headers()
+    from zoneinfo import ZoneInfo
+
+    body=request.get_json(silent=True) or {}
+    date_start=str(body.get("date_start","")).strip()
+    date_end=str(body.get("date_end","")).strip() or datetime.now(ZoneInfo("Asia/Kuala_Lumpur")).strftime("%Y-%m-%d")
 
     try:
-        response = session.post(
+        datetime.strptime(date_end,"%Y-%m-%d")
+        if date_start:
+            datetime.strptime(date_start,"%Y-%m-%d")
+            if date_start>date_end:
+                return jsonify({"error":"date_start cannot be later than date_end."}),400
+    except ValueError:
+        return jsonify({"error":"Dates must use YYYY-MM-DD format."}),400
+
+    session=build_sse_session()
+    headers=build_sse_headers()
+
+    try:
+        response=session.post(
             SSE_APPROVALS_DATATABLE_URL,
             headers=headers,
-            data=build_approved_payload(),
+            data=build_approved_payload(date_start,date_end),
             timeout=REQUEST_TIMEOUT_SECONDS
         )
-
         response.raise_for_status()
-        rows = response.json().get("data", [])
-        result = []
+        rows=response.json().get("data",[])
+        result=[]
 
         with get_database_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
 
             for row in rows:
-                link = row[9].split('href="', 1)[1].split('"', 1)[0]
-                sale_id = link.rstrip("/").split("/")[-1]
-                sale_response = session.get(
+                link=row[9].split('href="',1)[1].split('"',1)[0]
+                sale_id=link.rstrip("/").split("/")[-1]
+                sale_response=session.get(
                     f"https://ssegroup.com.my/api/sales/{sale_id}",
                     headers=headers,
                     timeout=REQUEST_TIMEOUT_SECONDS
                 )
                 sale_response.raise_for_status()
-                records = sale_response.json().get("data", {}).get("record", {}).get("records", [])
-                items = []
-                used_item_ids = {}
+                records=sale_response.json().get("data",{}).get("record",{}).get("records",[])
+                items=[]
+                used_item_ids={}
 
-                for item_index, record in enumerate(records):
-                    product_id = str(record.get("sale_product") or "").strip()
-                    product_code = str(record.get("product_code", "-"))
-                    product_name = str(record.get("product_name", "-"))
-                    product_description = str(record.get("product_description") or product_name or "-")
-                    item_id = make_unique_item_id(record, item_index, used_item_ids)
-                    quantity = to_number(record.get("sale_qty"))
-                    packaged = get_shared_packaging_status(connection, str(sale_id), item_id, product_code, quantity)
+                for item_index,record in enumerate(records):
+                    product_id=str(record.get("sale_product") or "").strip()
+                    product_code=str(record.get("product_code","-"))
+                    product_name=str(record.get("product_name","-"))
+                    product_description=str(record.get("product_description") or product_name or "-")
+                    item_id=make_unique_item_id(record,item_index,used_item_ids)
+                    quantity=to_number(record.get("sale_qty"))
+                    packaged=get_shared_packaging_status(connection,str(sale_id),item_id,product_code,quantity)
+
                     items.append({
-                        "id": item_id,
-                        "product_id": product_id,
-                        "code": product_code,
-                        "name": product_name,
-                        "product_description": product_description,
-                        "qty": quantity,
-                        "packaged": packaged
+                        "id":item_id,
+                        "product_id":product_id,
+                        "code":product_code,
+                        "name":product_name,
+                        "product_description":product_description,
+                        "qty":quantity,
+                        "packaged":packaged
                     })
 
                 result.append({
-                    "id": str(sale_id),
-                    "dealer": row[3],
-                    "remark": row[5],
-                    "date": row[8],
-                    "link": link,
-                    "items": items
+                    "id":str(sale_id),
+                    "dealer":row[3],
+                    "remark":row[5],
+                    "date":row[8],
+                    "link":link,
+                    "items":items
                 })
 
         return jsonify(result)
 
     except requests.RequestException as error:
         app.logger.exception("SSE approved-order request failed")
-        return jsonify({"error": "Unable to retrieve approved orders from SSE.", "details": str(error)}), 502
-    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as error:
+        return jsonify({"error":"Unable to retrieve approved orders from SSE.","details":str(error)}),502
+    except (KeyError,IndexError,TypeError,ValueError,json.JSONDecodeError) as error:
         app.logger.exception("Unexpected approved-order response format")
-        return jsonify({"error": "Unexpected approved-order data returned by SSE.", "details": str(error)}), 502
+        return jsonify({"error":"Unexpected approved-order data returned by SSE.","details":str(error)}),502
     except sqlite3.Error as error:
         app.logger.exception("Packaging database error")
-        return jsonify({"error": "Packaging status database error.", "details": str(error)}), 500
-
-
+        return jsonify({"error":"Packaging status database error.","details":str(error)}),500
 
 initialize_database()
 
