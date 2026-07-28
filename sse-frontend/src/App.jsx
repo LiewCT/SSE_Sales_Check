@@ -3,6 +3,7 @@ import axios from "axios";
 import "./App.css";
 import PwaInstallButton from "./PwaInstallButton";
 import CreditNoteReport from "./CreditNoteReport";
+import OpenInvoice from "./OpenInvoice";
 const API_BASE_URL = "https://sse-sales-check.onrender.com";
 // const API_BASE_URL = "http://localhost:5000";
 const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
@@ -278,10 +279,7 @@ const playNotificationSound=useCallback(()=>{
         : {};
       let shouldPlayNotification=Object.keys(detectedChanges).length>0;
       const fetchedOrderIds = formattedOrders.map((order) => order.id);
-      // Keep successful approvals showing as Approving until SSE removes the order.
-      setApprovingOrderIds((currentIds) =>
-        currentIds.filter((orderId) => fetchedOrderIds.includes(orderId))
-      );
+      setApprovingOrderIds((currentIds) => currentIds.filter((id) => fetchedOrderIds.includes(id)));
       setOrderChanges((currentChanges) => {
         let nextChanges = mergeOrderChanges(currentChanges, detectedChanges);
         nextChanges = Object.fromEntries(
@@ -561,15 +559,9 @@ const playNotificationSound=useCallback(()=>{
       });
       await fetchApprovals(true);
     } catch (error) {
-      setApprovingOrderIds((currentIds) =>
-        currentIds.filter((id) => id !== order.id)
-      );
+      setApprovingOrderIds((currentIds) => currentIds.filter((id) => id !== order.id));
       console.error("Cannot approve order", error);
-      window.alert(
-        error.response?.data?.error ||
-        error.response?.data?.details ||
-        "Unable to approve the order. Please try again."
-      );
+      window.alert(error.response?.data?.error || error.response?.data?.details || "Unable to approve the order. Please try again.");
     }
   };
   const stopDragAutoScroll = () => {
@@ -905,11 +897,11 @@ const playNotificationSound=useCallback(()=>{
   };
 
   if (currentPage === "credit-note-report") {
-    return (
-      <CreditNoteReport
-        onBack={() => setCurrentPage("packaging")}
-      />
-    );
+    return <CreditNoteReport onBack={() => setCurrentPage("packaging")} />;
+  }
+
+  if (currentPage === "open-invoice") {
+    return <OpenInvoice apiBaseUrl={API_BASE_URL} onBack={() => setCurrentPage("packaging")} />;
   }
 
   return (
@@ -922,6 +914,13 @@ const playNotificationSound=useCallback(()=>{
           </p>
         </div>
         <div className="header-actions">
+          <button
+            type="button"
+            onClick={() => setCurrentPage("open-invoice")}
+            style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#059669",color:"#fff",cursor:"pointer",fontWeight:"700"}}
+          >
+            Open Invoice
+          </button>
           <button
             type="button"
             onClick={() => setCurrentPage("credit-note-report")}
