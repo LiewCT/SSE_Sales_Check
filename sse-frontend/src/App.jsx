@@ -920,14 +920,14 @@ const playNotificationSound=useCallback(()=>{
         <div className="header-actions">
           <button
             type="button"
-            onClick={() => navigate("/open-invoice")}
+            onClick={() => navigate("/open-invoice",{apiBaseUrl:API_BASE_URL})}
             style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#059669",color:"#fff",cursor:"pointer",fontWeight:"700"}}
           >
             Open Invoice
           </button>
           <button
             type="button"
-            onClick={() => navigate("/credit-note-report")}
+            onClick={() => navigate("/credit-note-report",{apiBaseUrl:API_BASE_URL})}
             style={{
               padding: "10px 16px",
               border: "none",
