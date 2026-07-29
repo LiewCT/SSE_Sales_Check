@@ -17,6 +17,9 @@ const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
 const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
 const SERVER_SNAPSHOT_STORAGE_KEY = "packaging-server-snapshot";
 const ORDER_CHANGES_STORAGE_KEY = "packaging-order-changes";
+
+const getPageFromPath=()=>location.pathname==="/credit-note-report"?"credit-note-report":location.pathname==="/open-invoice"?"open-invoice":"packaging";
+
 // Normal grid: New, Trip, Hold. Fixed at bottom: Send Now.
 const ORDER_SECTIONS = [
   {
@@ -184,7 +187,14 @@ const mergeOrderChanges = (currentChanges, detectedChanges) => {
   return nextChanges;
 };
 function App() {
-  const [currentPage, setCurrentPage] = useState("packaging");
+  const [currentPage,setCurrentPage]=useState(getPageFromPath);
+  const navigate=useCallback(path=>{history.pushState({}, "", path);
+  setCurrentPage(getPageFromPath())},[]);
+  useEffect(()=>{const handler=()=>
+    setCurrentPage(getPageFromPath());
+    addEventListener("popstate",handler);
+    return()=>removeEventListener("popstate",handler)
+  },[]);
   const [orders, setOrders] = useState([]);
   const [openRows, setOpenRows] = useState([]);
   const [newOrderIds, setNewOrderIds] = useState([]);
@@ -897,11 +907,11 @@ const playNotificationSound=useCallback(()=>{
   };
 
   if (currentPage === "credit-note-report") {
-    return <CreditNoteReport onBack={() => setCurrentPage("packaging")} />;
+    return <CreditNoteReport onBack={() => navigate("/")}/>;
   }
 
   if (currentPage === "open-invoice") {
-    return <OpenInvoice apiBaseUrl={API_BASE_URL} onBack={() => setCurrentPage("packaging")} />;
+    return <OpenInvoice apiBaseUrl={API_BASE_URL} onBack={()=>navigate("/")}/>;
   }
 
   return (
@@ -916,14 +926,14 @@ const playNotificationSound=useCallback(()=>{
         <div className="header-actions">
           <button
             type="button"
-            onClick={() => setCurrentPage("open-invoice")}
+            onClick={() => navigate("/open-invoice")}
             style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#059669",color:"#fff",cursor:"pointer",fontWeight:"700"}}
           >
             Open Invoice
           </button>
           <button
             type="button"
-            onClick={() => setCurrentPage("credit-note-report")}
+            onClick={() => navigate("/credit-note-report")}
             style={{
               padding: "10px 16px",
               border: "none",
