@@ -93,7 +93,7 @@ function OpenInvoice({apiBaseUrl,onBack}){
             <small>Start Date</small>
             <input
               type="date"
-              value={dateStart}
+              value={dateStart||today}
               max={dateEnd||today}
               onChange={event=>setDateStart(event.target.value)}
             />
