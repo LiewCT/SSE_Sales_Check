@@ -10,13 +10,18 @@ function OpenInvoice({apiBaseUrl,onBack}){
   const fetchOrders=useCallback(async(silent=false)=>{
     silent?setRefreshing(true):setLoading(true);
     try{
-      const {data}=await axios.get(`${apiBaseUrl}/open-invoices`);
-      setOrders(Array.isArray(data)?data:[]);setError("");setLastUpdated(new Date());
+      const{data}=await axios.post(`${apiBaseUrl}/open-invoices`,{date_start:dateStart,date_end:dateEnd});
+      setOrders(Array.isArray(data)?data:[]);
+      setError("");
+      setLastUpdated(new Date());
     }catch(err){
       console.error("Cannot retrieve approved orders",err);
       setError(err.response?.data?.error||err.response?.data?.details||"Unable to retrieve approved orders.");
-    }finally{setLoading(false);setRefreshing(false);}
-  },[apiBaseUrl]);
+    }finally{
+      setLoading(false);
+      setRefreshing(false);
+    }
+  },[apiBaseUrl,dateStart,dateEnd]);
 
   useEffect(()=>{fetchOrders();const id=setInterval(()=>fetchOrders(true),POLL_INTERVAL_MS);return()=>clearInterval(id);},[fetchOrders]);
 
