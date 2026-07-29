@@ -188,7 +188,7 @@ const mergeOrderChanges = (currentChanges, detectedChanges) => {
 };
 function App() {
   const [currentPage,setCurrentPage]=useState(getPageFromPath);
-  const [navigationState,setNavigationState]=useState(()=>history.state||{});
+  const [navigationState,setNavigationState]=useState(()=>window.history.state||{});
   const [orders, setOrders] = useState([]);
   const [openRows, setOpenRows] = useState([]);
   const [newOrderIds, setNewOrderIds] = useState([]);
@@ -207,6 +207,22 @@ function App() {
   const autoScrollFrameRef = useRef(null);
   const dragPointerYRef = useRef(null);
   const dragScrollContainerRef = useRef(null);
+
+  const navigate=useCallback((path,state={})=>{
+    window.history.pushState(state,"",path);
+    setNavigationState(state);
+    setCurrentPage(getPageFromPath());
+    window.scrollTo({top:0,left:0});
+  },[]);
+
+  useEffect(()=>{
+    const handlePopState=(event)=>{
+      setNavigationState(event.state||{});
+      setCurrentPage(getPageFromPath());
+    };
+    window.addEventListener("popstate",handlePopState);
+    return()=>window.removeEventListener("popstate",handlePopState);
+  },[]);
 
 useEffect(()=>{
   notificationAudioRef.current=new Audio("/sharp_notification.wav");
@@ -900,12 +916,14 @@ const playNotificationSound=useCallback(()=>{
     );
   };
 
+  const pageApiBaseUrl=navigationState.apiBaseUrl||API_BASE_URL;
+
   if (currentPage === "credit-note-report") {
-    return <CreditNoteReport apiBaseUrl={API_BASE_URL} onBack={()=>navigate("/")}/>;
+    return <CreditNoteReport apiBaseUrl={pageApiBaseUrl} onBack={()=>navigate("/",{apiBaseUrl:API_BASE_URL})}/>;
   }
 
   if (currentPage === "open-invoice") {
-    return <OpenInvoice apiBaseUrl={API_BASE_URL} onBack={()=>navigate("/")}/>;
+    return <OpenInvoice apiBaseUrl={pageApiBaseUrl} onBack={()=>navigate("/",{apiBaseUrl:API_BASE_URL})}/>;
   }
 
   return (
