@@ -188,13 +188,9 @@ const mergeOrderChanges = (currentChanges, detectedChanges) => {
 };
 function App() {
   const [currentPage,setCurrentPage]=useState(getPageFromPath);
-  const navigate=useCallback(path=>{history.pushState({}, "", path);
-  setCurrentPage(getPageFromPath())},[]);
-  useEffect(()=>{const handler=()=>
-    setCurrentPage(getPageFromPath());
-    addEventListener("popstate",handler);
-    return()=>removeEventListener("popstate",handler)
-  },[]);
+  const [navigationState,setNavigationState]=useState(()=>history.state||{});
+  const navigate=useCallback((path,state={})=>{history.pushState(state,"",path);setNavigationState(state);setCurrentPage(getPageFromPath());},[]);
+  useEffect(()=>{const handler=()=>{setNavigationState(history.state||{});setCurrentPage(getPageFromPath());};addEventListener("popstate",handler);return()=>removeEventListener("popstate",handler);},[]);
   const [orders, setOrders] = useState([]);
   const [openRows, setOpenRows] = useState([]);
   const [newOrderIds, setNewOrderIds] = useState([]);
@@ -907,11 +903,11 @@ const playNotificationSound=useCallback(()=>{
   };
 
   if (currentPage === "credit-note-report") {
-    return <CreditNoteReport onBack={() => navigate("/")}/>;
+    return <CreditNoteReport apiBaseUrl={navigationState.apiBaseUrl||API_BASE_URL} onBack={()=>navigate("/")}/>;
   }
 
   if (currentPage === "open-invoice") {
-    return <OpenInvoice apiBaseUrl={API_BASE_URL} onBack={()=>navigate("/")}/>;
+    return <OpenInvoice apiBaseUrl={navigationState.apiBaseUrl||API_BASE_URL} onBack={()=>navigate("/")}/>;
   }
 
   return (
@@ -926,14 +922,14 @@ const playNotificationSound=useCallback(()=>{
         <div className="header-actions">
           <button
             type="button"
-            onClick={() => navigate("/open-invoice")}
+            onClick={() => navigate("/open-invoice",{apiBaseUrl:API_BASE_URL})}
             style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#059669",color:"#fff",cursor:"pointer",fontWeight:"700"}}
           >
             Open Invoice
           </button>
           <button
             type="button"
-            onClick={() => navigate("/credit-note-report")}
+            onClick={() => navigate("/credit-note-report",{apiBaseUrl:API_BASE_URL})}
             style={{
               padding: "10px 16px",
               border: "none",

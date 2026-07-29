@@ -3,8 +3,7 @@ import axios from"axios";
 import{utils,writeFileXLSX}from"xlsx";
 import"./CreditNoteReport.css";
 
-const API_BASE_URL="https://sse-sales-check.onrender.com";
-// const API_BASE_URL = "http://localhost:5000";
+const DEFAULT_API_BASE_URL="https://sse-sales-check.onrender.com";
 const CREDIT_NOTE_REPORT_API_URL=`${API_BASE_URL}/credit-note-report`;
 const CATEGORIES=[{key:"no_problem_cn",title:"No Problem CN"},{key:"problem_cn",title:"Problem CN"},{key:"others",title:"Others"}];
 const EXPORT_FIELDS=[{key:"dealer_name",label:"Dealer Name",width:25},{key:"date",label:"Date",width:20},{key:"product_code",label:"Code",width:18},{key:"product_name",label:"Name",width:48},{key:"product_description",label:"Description",width:48},{key:"remark",label:"Remark",width:38},{key:"refund_qty",label:"Refund Qty",width:12}];
@@ -19,7 +18,8 @@ const compareValues=(a,b,key)=>{const valueA=getCellValue(a,key),valueB=getCellV
 const sortRows=(rows,key,direction)=>{if(!key)return[...rows];const multiplier=direction==="desc"?-1:1;return[...rows].sort((a,b)=>compareValues(a,b,key)*multiplier);};
 const getSortLabels=key=>key==="date"||key==="refund_qty"?{asc:"Ascending",desc:"Descending"}:{asc:"A-Z",desc:"Z-A"};
 
-function CreditNoteReport({onBack}){
+function CreditNoteReport({apiBaseUrl=DEFAULT_API_BASE_URL,onBack}){
+  const CREDIT_NOTE_REPORT_API_URL=`${apiBaseUrl}/credit-note-report`;
   const[dateStart,setDateStart]=useState("");
   const[dateEnd,setDateEnd]=useState(getYesterdayDate);
   const[reportRows,setReportRows]=useState([]);
