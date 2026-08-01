@@ -15,8 +15,7 @@ SSE_APPROVALS_DATATABLE_URL="https://ssegroup.com.my/api/approvals/datatables"
 SSE_CREDITS_DATATABLE_URL="https://ssegroup.com.my/api/credits/datatables"
 SSE_CREDIT_DETAIL_URL="https://ssegroup.com.my/api/credits"
 
-def utc_now_iso():
-    return datetime.now(timezone.utc).isoformat()
+def utc_now_iso():return datetime.now(timezone.utc).isoformat()
 
 def get_database_connection():
     directory=os.path.dirname(DATABASE_PATH)
@@ -35,12 +34,17 @@ def initialize_database():
                 item_id TEXT NOT NULL,
                 product_code TEXT NOT NULL,
                 packaged INTEGER NOT NULL DEFAULT 0,
+                packed_quantity REAL NOT NULL DEFAULT 0,
                 last_quantity REAL NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY(order_id,item_id),
                 CHECK(packaged IN(0,1))
             )
         """)
+        columns={row["name"] for row in connection.execute("PRAGMA table_info(packaging_status)").fetchall()}
+        if "packed_quantity" not in columns:
+            connection.execute("ALTER TABLE packaging_status ADD COLUMN packed_quantity REAL NOT NULL DEFAULT 0")
+            connection.execute("UPDATE packaging_status SET packed_quantity=CASE WHEN packaged=1 THEN last_quantity ELSE 0 END")
 
 def build_sse_session():
     session=requests.Session()
@@ -48,15 +52,7 @@ def build_sse_session():
     return session
 
 def build_sse_headers(referer="https://ssegroup.com.my/approvals"):
-    return {
-        "Authorization":SSE_AUTHORIZATION,
-        "Content-Type":"application/x-www-form-urlencoded; charset=UTF-8",
-        "Accept":"application/json, text/javascript, */*; q=0.01",
-        "Origin":"https://ssegroup.com.my",
-        "Referer":referer,
-        "X-Requested-With":"XMLHttpRequest",
-        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-    }
+    return {"Authorization":SSE_AUTHORIZATION,"Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","Accept":"application/json, text/javascript, */*; q=0.01","Origin":"https://ssegroup.com.my","Referer":referer,"X-Requested-With":"XMLHttpRequest","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"}
 
 def parse_sse_json_response(response):
     if response.status_code==401:raise PermissionError("SSE authentication is unauthorized. Update SSE_CI_SESSION and SSE_AUTHORIZATION in Render.")
@@ -66,89 +62,20 @@ def parse_sse_json_response(response):
     except ValueError as error:raise RuntimeError("SSE returned a non-JSON response.") from error
 
 def build_approvals_payload():
-    return {
-        "draw":"1",
-        "start":"0",
-        "length":"100",
-        "search[value]":json.dumps({
-            "date_start":"",
-            "date_end":"",
-            "search":"",
-            "sale_branch":1,
-            "sale_status":{
-                "Pending":True,
-                "Approved":False,
-                "Rejected":False,
-                "Invoiced":False,
-                "NotInvoiced":False,
-                "PreOrder":True,
-                "Reserved":False
-            },
-            "sale_dealer":"",
-            "proforma_invoiced":False,
-            "pro_forma_code":""
-        }),
-        "search[regex]":"false"
-    }
+    return {"draw":"1","start":"0","length":"100","search[value]":json.dumps({"date_start":"","date_end":"","search":"","sale_branch":1,"sale_status":{"Pending":True,"Approved":False,"Rejected":False,"Invoiced":False,"NotInvoiced":False,"PreOrder":True,"Reserved":False},"sale_dealer":"","proforma_invoiced":False,"pro_forma_code":""}),"search[regex]":"false"}
 
 def build_approved_payload(date_start="",date_end=""):
-    return {
-        "draw":"1",
-        "start":"0",
-        "length":"100",
-        "search[value]":json.dumps({
-            "date_start":date_start,
-            "date_end":date_end,
-            "search":"",
-            "sale_branch":1,
-            "sale_status":{
-                "Pending":False,
-                "Approved":True,
-                "Rejected":False,
-                "Invoiced":False,
-                "NotInvoiced":False,
-                "PreOrder":False,
-                "Reserved":False
-            },
-            "sale_dealer":"",
-            "proforma_invoiced":False,
-            "pro_forma_code":""
-        }),
-        "search[regex]":"false"
-    }
+    return {"draw":"1","start":"0","length":"100","search[value]":json.dumps({"date_start":date_start,"date_end":date_end,"search":"","sale_branch":1,"sale_status":{"Pending":False,"Approved":True,"Rejected":False,"Invoiced":False,"NotInvoiced":False,"PreOrder":False,"Reserved":False},"sale_dealer":"","proforma_invoiced":False,"pro_forma_code":""}),"search[regex]":"false"}
 
 def build_credit_datatable_payload(length,date_start,date_end):
-    payload={
-        "draw":"5",
-        "start":"0",
-        "length":str(length),
-        "search[value]":json.dumps({
-            "search":"",
-            "branch_id":"1",
-            "credit_status":{"Valid":True,"Cancelled":True},
-            "einvoice_status":{"submitted":True,"unsubmitted":True},
-            "date_start":date_start,
-            "date_end":date_end
-        }),
-        "search[regex]":"false"
-    }
+    payload={"draw":"5","start":"0","length":str(length),"search[value]":json.dumps({"search":"","branch_id":"1","credit_status":{"Valid":True,"Cancelled":True},"einvoice_status":{"submitted":True,"unsubmitted":True},"date_start":date_start,"date_end":date_end}),"search[regex]":"false"}
     for index in range(9):
         prefix=f"columns[{index}]"
-        payload[f"{prefix}[data]"]=str(index)
-        payload[f"{prefix}[name]"]=""
-        payload[f"{prefix}[searchable]"]="true"
-        payload[f"{prefix}[orderable]"]="true"
-        payload[f"{prefix}[search][value]"]=""
-        payload[f"{prefix}[search][regex]"]="false"
+        payload.update({f"{prefix}[data]":str(index),f"{prefix}[name]":"",f"{prefix}[searchable]":"true",f"{prefix}[orderable]":"true",f"{prefix}[search][value]":"",f"{prefix}[search][regex]":"false"})
     return payload
 
 def request_credit_datatable(length,date_start,date_end):
-    response=build_sse_session().post(
-        SSE_CREDITS_DATATABLE_URL,
-        headers=build_sse_headers("https://ssegroup.com.my/credits"),
-        data=build_credit_datatable_payload(length,date_start,date_end),
-        timeout=REQUEST_TIMEOUT_SECONDS
-    )
+    response=build_sse_session().post(SSE_CREDITS_DATATABLE_URL,headers=build_sse_headers("https://ssegroup.com.my/credits"),data=build_credit_datatable_payload(length,date_start,date_end),timeout=REQUEST_TIMEOUT_SECONDS)
     return parse_sse_json_response(response)
 
 def extract_credit_note_id(button_html):
@@ -156,11 +83,7 @@ def extract_credit_note_id(button_html):
     return match.group(1) if match else ""
 
 def request_credit_detail(credit_note_id,dealer_name,credit_group):
-    response=build_sse_session().get(
-        f"{SSE_CREDIT_DETAIL_URL}/{credit_note_id}",
-        headers=build_sse_headers(f"https://ssegroup.com.my/credits/{credit_note_id}"),
-        timeout=REQUEST_TIMEOUT_SECONDS
-    )
+    response=build_sse_session().get(f"{SSE_CREDIT_DETAIL_URL}/{credit_note_id}",headers=build_sse_headers(f"https://ssegroup.com.my/credits/{credit_note_id}"),timeout=REQUEST_TIMEOUT_SECONDS)
     credit=parse_sse_json_response(response).get("data",{}).get("credit")
     if not isinstance(credit,dict):return []
     records=credit.get("records",[])
@@ -168,15 +91,7 @@ def request_credit_detail(credit_note_id,dealer_name,credit_group):
     rows=[]
     for record in records:
         if not isinstance(record,dict):continue
-        rows.append({
-            "credit_group":credit_group,
-            "dealer_name":dealer_name,
-            "date":str(credit.get("created_at","-")),
-            "product_code":str(record.get("product_code","-")),
-            "product_name":str(record.get("product_name","-")),
-            "product_description":str(record.get("product_description","-")),
-            "refund_qty":str(record.get("refund_qty","0"))
-        })
+        rows.append({"credit_group":credit_group,"dealer_name":dealer_name,"date":str(credit.get("created_at","-")),"product_code":str(record.get("product_code","-")),"product_name":str(record.get("product_name","-")),"product_description":str(record.get("product_description","-")),"refund_qty":str(record.get("refund_qty","0"))})
     return rows
 
 def make_unique_item_id(record,item_index,used_item_ids):
@@ -191,35 +106,39 @@ def to_number(value):
         return int(number) if number.is_integer() else number
     except(TypeError,ValueError):return 0
 
+def clamp_packed_quantity(value,quantity):return min(max(to_number(value),0),max(to_number(quantity),0))
+
 def get_shared_packaging_status(connection,order_id,item_id,product_code,current_quantity):
-    status=connection.execute("""
-        SELECT packaged,last_quantity,product_code
-        FROM packaging_status
-        WHERE order_id=? AND item_id=?
-    """,(order_id,item_id)).fetchone()
+    current_quantity=max(to_number(current_quantity),0)
+    status=connection.execute("SELECT packaged,packed_quantity,last_quantity,product_code FROM packaging_status WHERE order_id=? AND item_id=?",(order_id,item_id)).fetchone()
     now=utc_now_iso()
     if status is None:
-        connection.execute("""
-            INSERT INTO packaging_status(
-                order_id,item_id,product_code,packaged,last_quantity,updated_at
-            )VALUES(?,?,?,0,?,?)
-        """,(order_id,item_id,product_code,current_quantity,now))
-        return False
-    packaged=bool(status["packaged"])
-    previous_quantity=to_number(status["last_quantity"])
-    quantity_increased=current_quantity>previous_quantity
-    if quantity_increased:packaged=False
-    if quantity_increased or current_quantity!=previous_quantity or product_code!=status["product_code"]:
-        connection.execute("""
-            UPDATE packaging_status
-            SET product_code=?,packaged=?,last_quantity=?,updated_at=?
-            WHERE order_id=? AND item_id=?
-        """,(product_code,int(packaged),current_quantity,now,order_id,item_id))
-    return packaged
+        connection.execute("INSERT INTO packaging_status(order_id,item_id,product_code,packaged,packed_quantity,last_quantity,updated_at)VALUES(?,?,?,0,0,?,?)",(order_id,item_id,product_code,current_quantity,now))
+        return {"packed_quantity":0,"packaged":False}
+    previous_quantity=max(to_number(status["last_quantity"]),0)
+    packed_quantity=clamp_packed_quantity(status["packed_quantity"],current_quantity)
+    if current_quantity>previous_quantity:packed_quantity=0
+    packaged=current_quantity>0 and packed_quantity>=current_quantity
+    if current_quantity!=previous_quantity or product_code!=status["product_code"] or packed_quantity!=to_number(status["packed_quantity"]) or int(packaged)!=int(status["packaged"]):
+        connection.execute("UPDATE packaging_status SET product_code=?,packaged=?,packed_quantity=?,last_quantity=?,updated_at=? WHERE order_id=? AND item_id=?",(product_code,int(packaged),packed_quantity,current_quantity,now,order_id,item_id))
+    return {"packed_quantity":packed_quantity,"packaged":packaged}
+
+def build_order_items(connection,sale_id,records):
+    items=[]
+    used_item_ids={}
+    for item_index,record in enumerate(records):
+        product_id=str(record.get("sale_product") or "").strip()
+        product_code=str(record.get("product_code","-"))
+        product_name=str(record.get("product_name","-"))
+        product_description=str(record.get("product_description") or product_name or "-")
+        item_id=make_unique_item_id(record,item_index,used_item_ids)
+        quantity=max(to_number(record.get("sale_qty")),0)
+        packaging=get_shared_packaging_status(connection,str(sale_id),item_id,product_code,quantity)
+        items.append({"id":item_id,"product_id":product_id,"code":product_code,"name":product_name,"product_description":product_description,"qty":quantity,"packed_quantity":packaging["packed_quantity"],"packaged":packaging["packaged"]})
+    return items
 
 @app.route("/health",methods=["GET"])
-def health():
-    return jsonify({"status":"ok"})
+def health():return jsonify({"status":"ok"})
 
 @app.route("/packaging-status",methods=["PUT"])
 def update_packaging_status():
@@ -227,34 +146,32 @@ def update_packaging_status():
     if not isinstance(body,dict):return jsonify({"error":"JSON body is required."}),400
     order_id=str(body.get("order_id","")).strip()
     item_id=str(body.get("item_id","")).strip()
-    packaged=body.get("packaged")
     product_code=str(body.get("product_code",""))
-    quantity=to_number(body.get("quantity"))
+    quantity=max(to_number(body.get("quantity")),0)
+    action=str(body.get("action","")).strip().lower()
     if not order_id:return jsonify({"error":"order_id is required."}),400
     if not item_id:return jsonify({"error":"item_id is required."}),400
-    if not isinstance(packaged,bool):return jsonify({"error":"packaged must be true or false."}),400
-
+    if action not in("","step"):return jsonify({"error":"action must be step."}),400
     with get_database_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        status=connection.execute("""
-            SELECT product_code,last_quantity
-            FROM packaging_status
-            WHERE order_id=? AND item_id=?
-        """,(order_id,item_id)).fetchone()
-        if status is None:
-            connection.execute("""
-                INSERT INTO packaging_status(
-                    order_id,item_id,product_code,packaged,last_quantity,updated_at
-                )VALUES(?,?,?,?,?,?)
-            """,(order_id,item_id,product_code,int(packaged),quantity,utc_now_iso()))
+        status=connection.execute("SELECT packed_quantity,last_quantity FROM packaging_status WHERE order_id=? AND item_id=?",(order_id,item_id)).fetchone()
+        current_packed_quantity=clamp_packed_quantity(status["packed_quantity"] if status else 0,quantity)
+        if status and quantity>max(to_number(status["last_quantity"]),0):current_packed_quantity=0
+        if action=="step":packed_quantity=0 if quantity>0 and current_packed_quantity>=quantity else min(quantity,current_packed_quantity+1)
+        elif "packed_quantity" in body:
+            try:packed_quantity=float(body.get("packed_quantity"))
+            except(TypeError,ValueError):return jsonify({"error":"packed_quantity must be a number."}),400
         else:
-            connection.execute("""
-                UPDATE packaging_status
-                SET packaged=?,updated_at=?
-                WHERE order_id=? AND item_id=?
-            """,(int(packaged),utc_now_iso(),order_id,item_id))
-
-    return jsonify({"order_id":order_id,"item_id":item_id,"packaged":packaged})
+            packaged=body.get("packaged")
+            if not isinstance(packaged,bool):return jsonify({"error":"packed_quantity, packaged or action is required."}),400
+            packed_quantity=quantity if packaged else 0
+        packed_quantity=clamp_packed_quantity(packed_quantity,quantity)
+        packaged=quantity>0 and packed_quantity>=quantity
+        if status is None:
+            connection.execute("INSERT INTO packaging_status(order_id,item_id,product_code,packaged,packed_quantity,last_quantity,updated_at)VALUES(?,?,?,?,?,?,?)",(order_id,item_id,product_code,int(packaged),packed_quantity,quantity,utc_now_iso()))
+        else:
+            connection.execute("UPDATE packaging_status SET product_code=?,packaged=?,packed_quantity=?,last_quantity=?,updated_at=? WHERE order_id=? AND item_id=?",(product_code,int(packaged),packed_quantity,quantity,utc_now_iso(),order_id,item_id))
+    return jsonify({"order_id":order_id,"item_id":item_id,"quantity":quantity,"packed_quantity":packed_quantity,"packaged":packaged})
 
 @app.route("/approvals",methods=["GET"])
 def approvals():
@@ -262,54 +179,21 @@ def approvals():
     headers=build_sse_headers()
     try:
         response=session.post(SSE_APPROVALS_DATATABLE_URL,headers=headers,data=build_approvals_payload(),timeout=REQUEST_TIMEOUT_SECONDS)
-        response.raise_for_status()
-        rows=response.json().get("data",[])
+        rows=parse_sse_json_response(response).get("data",[])
         result=[]
-
         with get_database_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             for row in rows:
                 link=row[9].split('href="',1)[1].split('"',1)[0]
                 sale_id=link.rstrip("/").split("/")[-1]
                 sale_response=session.get(f"https://ssegroup.com.my/api/sales/{sale_id}",headers=headers,timeout=REQUEST_TIMEOUT_SECONDS)
-                sale_response.raise_for_status()
-                records=sale_response.json().get("data",{}).get("record",{}).get("records",[])
-                items=[]
-                used_item_ids={}
-
-                for item_index,record in enumerate(records):
-                    product_id=str(record.get("sale_product").strip())
-                    product_code=str(record.get("product_code","-"))
-                    product_name=str(record.get("product_name","-"))
-                    product_description=str(record.get("prproduct_descriptionoduct_name","-"))
-                    item_id=make_unique_item_id(record,item_index,used_item_ids)
-                    quantity=to_number(record.get("sale_qty"))
-                    packaged=get_shared_packaging_status(connection,str(sale_id),item_id,product_code,quantity)
-                    items.append({
-                        "id":item_id,
-                        "product_id":product_id,
-                        "code":product_code,
-                        "name":product_name,
-                        "product_description":product_description,
-                        "qty":quantity,
-                        "packaged":packaged
-                    })
-
-                result.append({
-                    "id":str(sale_id),
-                    "dealer":row[3],
-                    "remark":row[5],
-                    "date":row[8],
-                    "link":link,
-                    "items":items
-                })
-
+                records=parse_sse_json_response(sale_response).get("data",{}).get("record",{}).get("records",[])
+                result.append({"id":str(sale_id),"dealer":row[3],"remark":row[5],"date":row[8],"link":link,"items":build_order_items(connection,sale_id,records)})
         return jsonify(result)
-
     except requests.RequestException as error:
         app.logger.exception("SSE request failed")
         return jsonify({"error":"Unable to retrieve approvals from SSE.","details":str(error)}),502
-    except(KeyError,IndexError,TypeError,ValueError,json.JSONDecodeError) as error:
+    except(KeyError,IndexError,TypeError,ValueError,RuntimeError,json.JSONDecodeError) as error:
         app.logger.exception("Unexpected SSE response format")
         return jsonify({"error":"Unexpected data returned by SSE.","details":str(error)}),502
     except sqlite3.Error as error:
@@ -327,19 +211,11 @@ def approve_order():
     if not isinstance(selected_items,list):return jsonify({"error":"selected_items must be an array."}),400
     selected_items=[str(product_id).strip() for product_id in selected_items if str(product_id).strip()]
     if not selected_items:return jsonify({"error":"selected_items cannot be empty."}),400
-
     session=build_sse_session()
     headers=build_sse_headers(f"https://ssegroup.com.my/approvals/{sale_id}")
     headers.update({"Content-Type":"application/json","Accept":"application/json, text/plain, */*"})
-    payload={"sale_id":sale_id,"selected_items":selected_items,"sale_remark":sale_remark}
-
     try:
-        response=session.post(
-            f"https://ssegroup.com.my/api/sales/{sale_id}/approve-selected",
-            headers=headers,
-            json=payload,
-            timeout=REQUEST_TIMEOUT_SECONDS
-        )
+        response=session.post(f"https://ssegroup.com.my/api/sales/{sale_id}/approve-selected",headers=headers,json={"sale_id":sale_id,"selected_items":selected_items,"sale_remark":sale_remark},timeout=REQUEST_TIMEOUT_SECONDS)
         response.raise_for_status()
         try:response_data=response.json()
         except ValueError:response_data={"status":response.ok,"message":response.text or "Approval request completed."}
@@ -358,139 +234,66 @@ def credit_note_report():
     if date_start>date_end:return jsonify({"error":"date_start cannot be later than date_end."}),400
     if not SSE_CI_SESSION:return jsonify({"error":"SSE_CI_SESSION is not configured."}),500
     if not SSE_AUTHORIZATION:return jsonify({"error":"SSE_AUTHORIZATION is not configured."}),500
-
     def normalize_credit_remark(value):
-        text=str(value or "")
-        text=re.sub(r"<[^>]*>"," ",text)
+        text=re.sub(r"<[^>]*>"," ",str(value or ""))
         text=text.replace("&nbsp;"," ").replace("&#160;"," ").replace("\xa0"," ")
         text=re.sub(r"[\u200B-\u200D\uFEFF]","",text)
         return re.sub(r"[^A-Z0-9]+","",text.upper())
-
     category_labels={"no_problem_cn":"No Problem CN","problem_cn":"Problem CN","others":"Others"}
     empty_counts={key:0 for key in category_labels}
-
     try:
         first_response=request_credit_datatable(1,date_start,date_end)
         records_filtered=int(first_response.get("recordsFiltered",0))
-
-        if records_filtered<=0:
-            return jsonify({"status":True,"records_filtered":0,"matched_credit_notes":0,"report_rows":0,"category_counts":empty_counts.copy(),"category_report_rows":empty_counts.copy(),"data":[]})
-
-        second_response=request_credit_datatable(records_filtered,date_start,date_end)
-        datatable_rows=second_response.get("data",[])
+        if records_filtered<=0:return jsonify({"status":True,"records_filtered":0,"matched_credit_notes":0,"report_rows":0,"category_counts":empty_counts.copy(),"category_report_rows":empty_counts.copy(),"data":[]})
+        datatable_rows=request_credit_datatable(records_filtered,date_start,date_end).get("data",[])
         if not isinstance(datatable_rows,list):datatable_rows=[]
-
         credit_notes=[]
         used_credit_note_ids=set()
         category_counts=empty_counts.copy()
-
         for row in datatable_rows:
             if not isinstance(row,list) or len(row)<9:continue
-
             remark=str(row[5] or "").strip()
             normalized_remark=normalize_credit_remark(remark)
-
-            if normalized_remark=="NOPROBLEMCN":category="no_problem_cn"
-            elif normalized_remark=="PROBLEMCN":category="problem_cn"
-            else:category="others"
-
+            category="no_problem_cn" if normalized_remark=="NOPROBLEMCN" else "problem_cn" if normalized_remark=="PROBLEMCN" else "others"
             credit_note_id=extract_credit_note_id(row[8])
             if not credit_note_id or credit_note_id in used_credit_note_ids:continue
-
             used_credit_note_ids.add(credit_note_id)
             dealer_name=str(row[3] or "-").strip() or "-"
-
-            credit_notes.append({
-                "credit_note_id":credit_note_id,
-                "dealer_name":dealer_name,
-                "credit_group":len(credit_notes),
-                "credit_category":category,
-                "credit_category_label":category_labels[category],
-                "remark":remark or "-",
-                "credit_remark":remark or "-",
-                "credit_remark_normalized":normalized_remark
-            })
-
+            credit_notes.append({"credit_note_id":credit_note_id,"dealer_name":dealer_name,"credit_group":len(credit_notes),"credit_category":category,"credit_category_label":category_labels[category],"remark":remark or "-","credit_remark":remark or "-","credit_remark_normalized":normalized_remark})
             category_counts[category]+=1
-
-        if not credit_notes:
-            return jsonify({"status":True,"records_filtered":records_filtered,"matched_credit_notes":0,"report_rows":0,"category_counts":category_counts,"category_report_rows":empty_counts.copy(),"data":[]})
-
+        if not credit_notes:return jsonify({"status":True,"records_filtered":records_filtered,"matched_credit_notes":0,"report_rows":0,"category_counts":category_counts,"category_report_rows":empty_counts.copy(),"data":[]})
         credit_detail_results={}
-
         with ThreadPoolExecutor(max_workers=6) as executor:
-            future_map={
-                executor.submit(
-                    request_credit_detail,
-                    note["credit_note_id"],
-                    note["dealer_name"],
-                    note["credit_group"]
-                ):note
-                for note in credit_notes
-            }
-
+            future_map={executor.submit(request_credit_detail,note["credit_note_id"],note["dealer_name"],note["credit_group"]):note for note in credit_notes}
             for future in as_completed(future_map):
                 note=future_map[future]
                 credit_note_id=note["credit_note_id"]
-
                 try:
                     rows=future.result()
                     if not isinstance(rows,list):rows=[]
-
                     for detail in rows:
-                        if not isinstance(detail,dict):continue
-                        detail.update({
-                            "credit_note_id":credit_note_id,
-                            "credit_category":note["credit_category"],
-                            "credit_category_label":note["credit_category_label"],
-                            "remark":note["remark"],
-                            "credit_remark":note["credit_remark"],
-                            "credit_remark_normalized":note["credit_remark_normalized"]
-                        })
-
+                        if isinstance(detail,dict):detail.update({"credit_note_id":credit_note_id,"credit_category":note["credit_category"],"credit_category_label":note["credit_category_label"],"remark":note["remark"],"credit_remark":note["credit_remark"],"credit_remark_normalized":note["credit_remark_normalized"]})
                     credit_detail_results[credit_note_id]=rows
-
-                except PermissionError:
-                    raise
-
-                except requests.RequestException as error:
+                except PermissionError:raise
+                except(requests.RequestException,TypeError,ValueError,RuntimeError) as error:
                     app.logger.error("Cannot retrieve credit note %s: %s",credit_note_id,error)
                     credit_detail_results[credit_note_id]=[]
-
-                except(TypeError,ValueError,RuntimeError) as error:
-                    app.logger.error("Invalid credit note response %s: %s",credit_note_id,error)
-                    credit_detail_results[credit_note_id]=[]
-
         report_rows=[]
         category_report_rows=empty_counts.copy()
-
         for note in credit_notes:
             rows=credit_detail_results.get(note["credit_note_id"],[])
             report_rows.extend(rows)
             category_report_rows[note["credit_category"]]+=len(rows)
-
-        return jsonify({
-            "status":True,
-            "records_filtered":records_filtered,
-            "matched_credit_notes":len(credit_notes),
-            "report_rows":len(report_rows),
-            "category_counts":category_counts,
-            "category_report_rows":category_report_rows,
-            "data":report_rows
-        })
-
+        return jsonify({"status":True,"records_filtered":records_filtered,"matched_credit_notes":len(credit_notes),"report_rows":len(report_rows),"category_counts":category_counts,"category_report_rows":category_report_rows,"data":report_rows})
     except PermissionError as error:
         app.logger.exception("SSE credit authentication failed")
         return jsonify({"error":str(error)}),401
-
     except requests.RequestException as error:
         app.logger.exception("SSE credit request failed")
         return jsonify({"error":"Unable to request the SSE credit API.","details":str(error)}),502
-
     except(TypeError,ValueError,RuntimeError,json.JSONDecodeError) as error:
         app.logger.exception("Unexpected SSE credit response")
         return jsonify({"error":"Unexpected data returned by the SSE credit API.","details":str(error)}),502
-
     except Exception as error:
         app.logger.exception("Credit Note Report failed")
         return jsonify({"error":"Unable to generate the Credits Note Report.","details":str(error)}),500
@@ -498,84 +301,34 @@ def credit_note_report():
 @app.route("/open-invoices",methods=["POST"])
 def open_invoices():
     from zoneinfo import ZoneInfo
-
     body=request.get_json(silent=True) or {}
     date_start=str(body.get("date_start","")).strip()
     date_end=str(body.get("date_end","")).strip() or datetime.now(ZoneInfo("Asia/Kuala_Lumpur")).strftime("%Y-%m-%d")
-
     try:
         datetime.strptime(date_end,"%Y-%m-%d")
         if date_start:
             datetime.strptime(date_start,"%Y-%m-%d")
-            if date_start>date_end:
-                return jsonify({"error":"date_start cannot be later than date_end."}),400
-    except ValueError:
-        return jsonify({"error":"Dates must use YYYY-MM-DD format."}),400
-
+            if date_start>date_end:return jsonify({"error":"date_start cannot be later than date_end."}),400
+    except ValueError:return jsonify({"error":"Dates must use YYYY-MM-DD format."}),400
     session=build_sse_session()
     headers=build_sse_headers()
-
     try:
-        response=session.post(
-            SSE_APPROVALS_DATATABLE_URL,
-            headers=headers,
-            data=build_approved_payload(date_start,date_end),
-            timeout=REQUEST_TIMEOUT_SECONDS
-        )
-        response.raise_for_status()
-        rows=response.json().get("data",[])
+        response=session.post(SSE_APPROVALS_DATATABLE_URL,headers=headers,data=build_approved_payload(date_start,date_end),timeout=REQUEST_TIMEOUT_SECONDS)
+        rows=parse_sse_json_response(response).get("data",[])
         result=[]
-
         with get_database_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
-
             for row in rows:
                 link=row[9].split('href="',1)[1].split('"',1)[0]
                 sale_id=link.rstrip("/").split("/")[-1]
-                sale_response=session.get(
-                    f"https://ssegroup.com.my/api/sales/{sale_id}",
-                    headers=headers,
-                    timeout=REQUEST_TIMEOUT_SECONDS
-                )
-                sale_response.raise_for_status()
-                records=sale_response.json().get("data",{}).get("record",{}).get("records",[])
-                items=[]
-                used_item_ids={}
-
-                for item_index,record in enumerate(records):
-                    product_id=str(record.get("sale_product") or "").strip()
-                    product_code=str(record.get("product_code","-"))
-                    product_name=str(record.get("product_name","-"))
-                    product_description=str(record.get("product_description") or product_name or "-")
-                    item_id=make_unique_item_id(record,item_index,used_item_ids)
-                    quantity=to_number(record.get("sale_qty"))
-                    packaged=get_shared_packaging_status(connection,str(sale_id),item_id,product_code,quantity)
-
-                    items.append({
-                        "id":item_id,
-                        "product_id":product_id,
-                        "code":product_code,
-                        "name":product_name,
-                        "product_description":product_description,
-                        "qty":quantity,
-                        "packaged":packaged
-                    })
-
-                result.append({
-                    "id":str(sale_id),
-                    "dealer":row[3],
-                    "remark":row[5],
-                    "date":row[8],
-                    "link":link,
-                    "items":items
-                })
-
+                sale_response=session.get(f"https://ssegroup.com.my/api/sales/{sale_id}",headers=headers,timeout=REQUEST_TIMEOUT_SECONDS)
+                records=parse_sse_json_response(sale_response).get("data",{}).get("record",{}).get("records",[])
+                result.append({"id":str(sale_id),"dealer":row[3],"remark":row[5],"date":row[8],"link":link,"items":build_order_items(connection,sale_id,records)})
         return jsonify(result)
-
     except requests.RequestException as error:
         app.logger.exception("SSE approved-order request failed")
         return jsonify({"error":"Unable to retrieve approved orders from SSE.","details":str(error)}),502
-    except (KeyError,IndexError,TypeError,ValueError,json.JSONDecodeError) as error:
+    except(KeyError,IndexError,TypeError,ValueError,RuntimeError,json.JSONDecodeError) as error:
         app.logger.exception("Unexpected approved-order response format")
         return jsonify({"error":"Unexpected approved-order data returned by SSE.","details":str(error)}),502
     except sqlite3.Error as error:
@@ -584,5 +337,4 @@ def open_invoices():
 
 initialize_database()
 
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=5000)
+if __name__=="__main__":app.run(host="0.0.0.0",port=5000)

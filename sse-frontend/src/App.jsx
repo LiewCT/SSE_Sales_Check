@@ -4,8 +4,8 @@ import "./App.css";
 import PwaInstallButton from "./PwaInstallButton";
 import CreditNoteReport from "./CreditNoteReport";
 import OpenInvoice from "./OpenInvoice";
-const API_BASE_URL = "https://sse-sales-check.onrender.com";
-// const API_BASE_URL = "http://localhost:5000";
+// const API_BASE_URL = "https://sse-sales-check.onrender.com";
+const API_BASE_URL = "http://localhost:5000";
 const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
 const PACKAGING_STATUS_API_URL = `${API_BASE_URL}/packaging-status`;
 const APPROVE_ORDER_API_URL = `${API_BASE_URL}/approve-order`;
@@ -22,6 +22,18 @@ const ORDER_CHANGES_STORAGE_KEY = "packaging-order-changes";
 
 const getPageFromPath=()=>location.pathname==="/credit-note-report"?"credit-note-report":location.pathname==="/open-invoice"?"open-invoice":"packaging";
 const normalizeProductCode=value=>String(value||"").replace(/[\r\n\t]/g,"").trim().toUpperCase();
+const toQuantity=value=>Math.max(0,Number(value)||0);
+const clampPackedQuantity=(value,quantity)=>Math.min(toQuantity(quantity),toQuantity(value));
+const isItemFullyPackaged=item=>toQuantity(item?.quantity)>0&&toQuantity(item?.packedQuantity)>=toQuantity(item?.quantity);
+const getNextPackedQuantity=item=>isItemFullyPackaged(item)?0:Math.min(toQuantity(item?.quantity),toQuantity(item?.packedQuantity)+1);
+const getProductPackagingLabel=(item,packedValue=item?.packedQuantity)=>{
+  const total=toQuantity(item?.quantity);
+  const packed=clampPackedQuantity(packedValue,total);
+  if(total<=0)return "0/0 Not Packed";
+  if(packed<=0)return `0/${total} Not Packed`;
+  if(packed>=total)return `${packed}/${total} Packed`;
+  return `${packed}/${total} Ongoing`;
+};
 
 // Normal grid: New, Trip, Hold. Fixed at bottom: Send Now.
 const ORDER_SECTIONS = [
@@ -205,6 +217,9 @@ function App() {
   const [scanCode,setScanCode]=useState("");
   const [scanResult,setScanResult]=useState({type:"ready",message:"Scanner ready"});
   const [highlightedItemKey,setHighlightedItemKey]=useState(null);
+  const ordersRef=useRef([]);
+  const updatingItemKeysRef=useRef(new Set());
+  const scanQueueRef=useRef(new Map());
   const serverSnapshotRef = useRef(getSavedObject(SERVER_SNAPSHOT_STORAGE_KEY));
   const isFetchingRef = useRef(false);
   const justDraggedRef = useRef(false);
@@ -282,17 +297,20 @@ const playNotificationSound=useCallback(()=>{
         const formattedItems = items.map((item, itemIndex) => {
           const itemId = String(item.id || item.code || `${item.name}-${itemIndex}`);
           const storageKey = `${orderId}-${itemId}`;
-          const quantity = Number(item.qty);
-          const pendingStatus = pendingPackagingRef.current.get(storageKey);
+          const quantity=toQuantity(item.qty);
+          const pendingPackedQuantity=pendingPackagingRef.current.get(storageKey);
+          const serverPackedQuantity=item.packed_quantity!==undefined?toQuantity(item.packed_quantity):item.packedQuantity!==undefined?toQuantity(item.packedQuantity):item.packaged?quantity:0;
+          const packedQuantity=clampPackedQuantity(pendingPackedQuantity??serverPackedQuantity,quantity);
           return {
             itemId,
-            product_id: String(item.product_id || ""),
-            product_code: item.code || "-",
-            product_name: item.name || "-",
-            quantity: Number.isFinite(quantity) ? quantity : 0,
+            product_id:String(item.product_id||""),
+            product_ids:Array.isArray(item.product_ids)?item.product_ids.map(productId=>String(productId||"")).filter(Boolean):[],
+            product_code:item.code||"-",
+            product_name:item.name||"-",
+            quantity,
+            packedQuantity,
             storageKey,
-            // Backend values are shared by every browser; pending local values remain until the PUT request finishes.
-            packaged: pendingStatus ?? Boolean(item.packaged)
+            packaged:quantity>0&&packedQuantity>=quantity
           };
         });
         return {
@@ -352,6 +370,7 @@ const playNotificationSound=useCallback(()=>{
       if(shouldPlayNotification){
         playNotificationSound();
       }
+      ordersRef.current=formattedOrders;
       setOrders(formattedOrders);
       setLastUpdated(new Date());
     } catch (error) {
@@ -435,36 +454,46 @@ const playNotificationSound=useCallback(()=>{
       }, 800);
     }
   };
-  const setItemPackagingStatus = async (orderId,itemIndex,newStatus,showAlert=true) => {
-    const selectedOrder=orders.find(order=>order.id===orderId);
+  const setItemPackedQuantity=async(orderId,itemIndex,newPackedQuantity,showAlert=true)=>{
+    const selectedOrder=ordersRef.current.find(order=>order.id===orderId);
     const selectedItem=selectedOrder?.items[itemIndex];
-    if(!selectedItem||updatingItemKeys.includes(selectedItem.storageKey))return false;
-    const previousStatus=Boolean(selectedItem.packaged);
-    if(previousStatus===newStatus)return true;
-    pendingPackagingRef.current.set(selectedItem.storageKey,newStatus);
-    setUpdatingItemKeys(currentKeys=>[...currentKeys,selectedItem.storageKey]);
-    setOrders(currentOrders=>currentOrders.map(order=>order.id===orderId?{...order,items:order.items.map((item,currentItemIndex)=>currentItemIndex===itemIndex?{...item,packaged:newStatus}:item)}:order));
+    if(!selectedItem||updatingItemKeysRef.current.has(selectedItem.storageKey))return false;
+    const previousPackedQuantity=toQuantity(selectedItem.packedQuantity);
+    const nextPackedQuantity=clampPackedQuantity(newPackedQuantity,selectedItem.quantity);
+    if(previousPackedQuantity===nextPackedQuantity)return true;
+    const replaceItemState=(packedQuantity)=>{
+      const packaged=selectedItem.quantity>0&&packedQuantity>=selectedItem.quantity;
+      const nextOrders=ordersRef.current.map(order=>order.id===orderId?{...order,items:order.items.map(item=>item.itemId===selectedItem.itemId?{...item,packedQuantity,packaged}:item)}:order);
+      ordersRef.current=nextOrders;
+      setOrders(nextOrders);
+    };
+    pendingPackagingRef.current.set(selectedItem.storageKey,nextPackedQuantity);
+    updatingItemKeysRef.current.add(selectedItem.storageKey);
+    setUpdatingItemKeys([...updatingItemKeysRef.current]);
+    replaceItemState(nextPackedQuantity);
     try{
-      const response=await axios.put(PACKAGING_STATUS_API_URL,{order_id:orderId,item_id:selectedItem.itemId,product_code:selectedItem.product_code,quantity:selectedItem.quantity,packaged:newStatus});
-      const confirmedStatus=Boolean(response.data?.packaged);
-      pendingPackagingRef.current.set(selectedItem.storageKey,confirmedStatus);
-      setOrders(currentOrders=>currentOrders.map(order=>order.id===orderId?{...order,items:order.items.map(item=>item.itemId===selectedItem.itemId?{...item,packaged:confirmedStatus}:item)}:order));
-      return confirmedStatus===newStatus;
+      const response=await axios.put(PACKAGING_STATUS_API_URL,{order_id:orderId,item_id:selectedItem.itemId,product_code:selectedItem.product_code,quantity:selectedItem.quantity,action:"step"});
+      const responsePackedQuantity=Number(response.data?.packed_quantity);
+      const confirmedPackedQuantity=clampPackedQuantity(Number.isFinite(responsePackedQuantity)?responsePackedQuantity:response.data?.packaged?selectedItem.quantity:0,selectedItem.quantity);
+      pendingPackagingRef.current.set(selectedItem.storageKey,confirmedPackedQuantity);
+      replaceItemState(confirmedPackedQuantity);
+      return true;
     }catch(error){
-      console.error("Cannot update packaging status",error);
-      pendingPackagingRef.current.set(selectedItem.storageKey,previousStatus);
-      setOrders(currentOrders=>currentOrders.map(order=>order.id===orderId?{...order,items:order.items.map(item=>item.itemId===selectedItem.itemId?{...item,packaged:previousStatus}:item)}:order));
-      if(showAlert)window.alert("Packaging status was not saved. Please try again.");
+      console.error("Cannot update packaging quantity",error);
+      pendingPackagingRef.current.set(selectedItem.storageKey,previousPackedQuantity);
+      replaceItemState(previousPackedQuantity);
+      if(showAlert)window.alert("Packaging quantity was not saved. Please try again.");
       return false;
     }finally{
       pendingPackagingRef.current.delete(selectedItem.storageKey);
-      setUpdatingItemKeys(currentKeys=>currentKeys.filter(key=>key!==selectedItem.storageKey));
+      updatingItemKeysRef.current.delete(selectedItem.storageKey);
+      setUpdatingItemKeys([...updatingItemKeysRef.current]);
       fetchApprovals(true);
     }
   };
   const updateItem=(orderId,itemIndex)=>{
-    const item=orders.find(order=>order.id===orderId)?.items[itemIndex];
-    if(item)setItemPackagingStatus(orderId,itemIndex,!Boolean(item.packaged),true);
+    const item=ordersRef.current.find(order=>order.id===orderId)?.items[itemIndex];
+    if(item)setItemPackedQuantity(orderId,itemIndex,getNextPackedQuantity(item),true);
   };
   const revealScannedItem=(orderId,storageKey)=>{
     setOpenRows(currentRows=>currentRows.includes(orderId)?currentRows:[...currentRows,orderId]);
@@ -478,31 +507,42 @@ const playNotificationSound=useCallback(()=>{
       row?.scrollIntoView({behavior:"smooth",block:"center"});
     },80);
   };
-  const processScannedCode=useCallback(async rawCode=>{
-    const code=normalizeProductCode(rawCode);
-    setScanCode("");
-    if(!code){
-      setScanResult({type:"error",message:"No product code received"});
-      return;
-    }
+  const processScannedCodeNow=async code=>{
     const matches=[];
-    orders.forEach(order=>order.items.forEach((item,itemIndex)=>{
+    ordersRef.current.forEach(order=>order.items.forEach((item,itemIndex)=>{
       if(normalizeProductCode(item.product_code)===code)matches.push({order,item,itemIndex});
     }));
     if(matches.length===0){
       setScanResult({type:"error",message:`${code} not found in any order`});
       return;
     }
-    const match=matches.find(result=>!result.item.packaged&&!updatingItemKeys.includes(result.item.storageKey))||matches[0];
-    revealScannedItem(match.order.id,match.item.storageKey);
-    if(match.item.packaged){
-      setScanResult({type:"warning",message:`${code} is already packed · ${match.order.name}`});
+    const match=matches.find(result=>!isItemFullyPackaged(result.item)&&!updatingItemKeysRef.current.has(result.item.storageKey))||matches.find(result=>!updatingItemKeysRef.current.has(result.item.storageKey))||matches[0];
+    if(updatingItemKeysRef.current.has(match.item.storageKey)){
+      setScanResult({type:"saving",message:`${code} is waiting for the previous scan`});
       return;
     }
-    setScanResult({type:"saving",message:`Packing ${code} · ${match.order.name}`});
-    const saved=await setItemPackagingStatus(match.order.id,match.itemIndex,true,false);
-    setScanResult(saved?{type:"success",message:`${code} packed · ${match.order.name}`}:{type:"error",message:`Failed to save ${code}`});
-  },[orders,updatingItemKeys]);
+    revealScannedItem(match.order.id,match.item.storageKey);
+    const unpacking=isItemFullyPackaged(match.item);
+    const nextPackedQuantity=getNextPackedQuantity(match.item);
+    const nextLabel=getProductPackagingLabel(match.item,nextPackedQuantity);
+    setScanResult({type:"saving",message:`${unpacking?"Unpacking":"Packing"} ${code} · ${nextLabel} · ${match.order.name}`});
+    const saved=await setItemPackedQuantity(match.order.id,match.itemIndex,nextPackedQuantity,false);
+    setScanResult(saved?{type:"success",message:`${code} · ${unpacking?"Unpacked · ":""}${nextLabel} · ${match.order.name}`}:{type:"error",message:`Failed to save ${code}`});
+  };
+  const processScannedCode=useCallback(rawCode=>{
+    const code=normalizeProductCode(rawCode);
+    setScanCode("");
+    if(!code){
+      setScanResult({type:"error",message:"No product code received"});
+      return;
+    }
+    const previousTask=scanQueueRef.current.get(code)||Promise.resolve();
+    const nextTask=previousTask.catch(()=>{}).then(()=>processScannedCodeNow(code)).finally(()=>{
+      if(scanQueueRef.current.get(code)===nextTask)scanQueueRef.current.delete(code);
+    });
+    scanQueueRef.current.set(code,nextTask);
+  },[orders]);
+
 
   useEffect(()=>{
     if(currentPage!=="packaging")return undefined;
@@ -526,38 +566,21 @@ const playNotificationSound=useCallback(()=>{
     window.addEventListener("keydown",handleScannerKeyDown);
     return()=>window.removeEventListener("keydown",handleScannerKeyDown);
   },[currentPage,processScannedCode]);
-  const getPackagingStatus = (items) => {
-    if (items.length === 0) {
-      return "No Items";
-    }
-    const packed = items.filter((item) => item.packaged).length;
-    if (packed === 0) {
-      return "Not Packed";
-    }
-    if (packed === items.length) {
-      return "Packaged";
-    }
-    return `Ongoing (${packed}/${items.length})`;
+  const getPackagingTotals=items=>items.reduce((totals,item)=>({packed:totals.packed+clampPackedQuantity(item.packedQuantity,item.quantity),total:totals.total+toQuantity(item.quantity)}),{packed:0,total:0});
+  const getPackagingStatus=items=>{
+    if(items.length===0)return "No Items";
+    const {packed,total}=getPackagingTotals(items);
+    if(total<=0||packed<=0)return "Not Packed";
+    if(packed>=total)return "Packaged";
+    return "Ongoing";
   };
-  const getPackagingClass = (items) => {
-    if (items.length === 0) {
-      return "not-packed-status";
-    }
-    const packed = items.filter((item) => item.packaged).length;
-    if (packed === 0) {
-      return "not-packed-status";
-    }
-    if (packed === items.length) {
-      return "packaged-status";
-    }
-    return "ongoing-status";
+  const getPackagingClass=items=>{
+    if(items.length===0)return "not-packed-status";
+    const {packed,total}=getPackagingTotals(items);
+    if(total<=0||packed<=0)return "not-packed-status";
+    return packed>=total?"packaged-status":"ongoing-status";
   };
-  const isOrderFullyPackaged = (order) => {
-    if (!order || order.items.length === 0) {
-      return false;
-    }
-    return order.items.every((item) => item.packaged);
-  };
+  const isOrderFullyPackaged=order=>Boolean(order?.items?.length)&&order.items.every(isItemFullyPackaged);
   const canDropIntoSection = (order, targetType) => {
     // New, Trip and Hold accept any order.
     if (targetType !== "send_now") {
@@ -574,7 +597,8 @@ const playNotificationSound=useCallback(()=>{
       return;
     }
     const selectedItems = order.items
-      .map((item) => String(item.product_id).trim())
+      .flatMap(item=>Array.isArray(item.product_ids)?item.product_ids:[item.product_id])
+      .map(productId=>String(productId||"").trim())
       .filter(Boolean);
     if (selectedItems.length === 0) {
       window.alert("No product IDs were found for approval.");
@@ -888,26 +912,19 @@ const playNotificationSound=useCallback(()=>{
                                         <td className="pack-button-cell">
                                           <button
                                             type="button"
-                                            className={
-                                              item.packaged
-                                                ? "packed"
-                                                : "not-packed"
-                                            }
+                                            className={isItemFullyPackaged(item)?"packed":"not-packed"}
                                             disabled={updatingItemKeys.includes(
                                               item.storageKey
                                             )}
+                                            title="One click packs one unit. Click again after fully packed to unpack."
                                             onClick={(event) => {
                                               event.stopPropagation();
                                               updateItem(order.id, itemIndex);
                                             }}
                                           >
-                                            {updatingItemKeys.includes(
-                                              item.storageKey
-                                            )
-                                              ? "Saving..."
-                                              : item.packaged
-                                                ? "✓ Packed"
-                                                : "Pack"}
+                                            {updatingItemKeys.includes(item.storageKey)
+                                              ? `Saving ${getProductPackagingLabel(item)}...`
+                                              : `${isItemFullyPackaged(item)?"✓ ":""}${getProductPackagingLabel(item)}`}
                                           </button>
                                         </td>
                                       </tr>
@@ -949,7 +966,7 @@ const playNotificationSound=useCallback(()=>{
         <div>
           <h2>Packaging Queue</h2>
           <p className="page-description">
-            Click an order to expand it. Drag an order between the cards.
+            Click an order to expand it. Each product click or scan packs one unit.
           </p>
         </div>
         <div className="header-actions">
