@@ -4,8 +4,8 @@ import "./App.css";
 import PwaInstallButton from "./PwaInstallButton";
 import CreditNoteReport from "./CreditNoteReport";
 import OpenInvoice from "./OpenInvoice";
-const API_BASE_URL = "https://sse-sales-check.onrender.com";
-// const API_BASE_URL = "http://localhost:5000";
+// const API_BASE_URL = "https://sse-sales-check.onrender.com";
+const API_BASE_URL = "http://localhost:5000";
 const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
 const PACKAGING_STATUS_API_URL = `${API_BASE_URL}/packaging-status`;
 const APPROVE_ORDER_API_URL = `${API_BASE_URL}/approve-order`;
@@ -13,12 +13,15 @@ const POLL_INTERVAL_MS = 3000;
 const CARD_HEIGHT_PX = 450;
 const AUTO_SCROLL_EDGE_PX = 90;
 const AUTO_SCROLL_MAX_SPEED = 50;
+const SCANNER_BUFFER_RESET_MS = 300;
+const SCAN_HIGHLIGHT_MS = 2500;
 const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
 const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
 const SERVER_SNAPSHOT_STORAGE_KEY = "packaging-server-snapshot";
 const ORDER_CHANGES_STORAGE_KEY = "packaging-order-changes";
 
 const getPageFromPath=()=>location.pathname==="/credit-note-report"?"credit-note-report":location.pathname==="/open-invoice"?"open-invoice":"packaging";
+const normalizeProductCode=value=>String(value||"").replace(/[\r\n\t]/g,"").trim().toUpperCase();
 
 // Normal grid: New, Trip, Hold. Fixed at bottom: Send Now.
 const ORDER_SECTIONS = [
@@ -199,6 +202,9 @@ function App() {
   const [orderChanges, setOrderChanges] = useState(() => getSavedObject(ORDER_CHANGES_STORAGE_KEY));
   const [updatingItemKeys, setUpdatingItemKeys] = useState([]);
   const [approvingOrderIds, setApprovingOrderIds] = useState([]);
+  const [scanCode,setScanCode]=useState("");
+  const [scanResult,setScanResult]=useState({type:"ready",message:"Scanner ready"});
+  const [highlightedItemKey,setHighlightedItemKey]=useState(null);
   const serverSnapshotRef = useRef(getSavedObject(SERVER_SNAPSHOT_STORAGE_KEY));
   const isFetchingRef = useRef(false);
   const justDraggedRef = useRef(false);
@@ -207,6 +213,10 @@ function App() {
   const autoScrollFrameRef = useRef(null);
   const dragPointerYRef = useRef(null);
   const dragScrollContainerRef = useRef(null);
+  const scanInputRef=useRef(null);
+  const scannerBufferRef=useRef("");
+  const scannerResetTimerRef=useRef(null);
+  const scanHighlightTimerRef=useRef(null);
 
   const navigate=useCallback((path,state={})=>{
     window.history.pushState(state,"",path);
@@ -231,10 +241,14 @@ useEffect(()=>{
 },[]);
 
 useEffect(()=>()=>{
-  if(autoScrollFrameRef.current){
-    cancelAnimationFrame(autoScrollFrameRef.current);
-  }
+  if(autoScrollFrameRef.current)cancelAnimationFrame(autoScrollFrameRef.current);
+  if(scannerResetTimerRef.current)clearTimeout(scannerResetTimerRef.current);
+  if(scanHighlightTimerRef.current)clearTimeout(scanHighlightTimerRef.current);
 },[]);
+
+useEffect(()=>{
+  if(currentPage==="packaging")scanInputRef.current?.focus();
+},[currentPage]);
 
 const playNotificationSound=useCallback(()=>{
   const audio=notificationAudioRef.current;
@@ -421,98 +435,97 @@ const playNotificationSound=useCallback(()=>{
       }, 800);
     }
   };
-  const updateItem = async (orderId, itemIndex) => {
-    const selectedOrder = orders.find((order) => order.id === orderId);
-    const selectedItem = selectedOrder?.items[itemIndex];
-    if (!selectedItem) {
-      return;
-    }
-    if (updatingItemKeys.includes(selectedItem.storageKey)) {
-      return;
-    }
-    const previousStatus = Boolean(selectedItem.packaged);
-    const newStatus = !previousStatus;
-    // Optimistically update this browser immediately while the backend saves the shared status.
-    pendingPackagingRef.current.set(selectedItem.storageKey, newStatus);
-    setUpdatingItemKeys((currentKeys) => [
-      ...currentKeys,
-      selectedItem.storageKey
-    ]);
-    setOrders((currentOrders) =>
-      currentOrders.map((order) =>
-        order.id === orderId
-          ? {
-              ...order,
-              items: order.items.map((item, currentItemIndex) =>
-                currentItemIndex === itemIndex
-                  ? {
-                      ...item,
-                      packaged: newStatus
-                    }
-                  : item
-              )
-            }
-          : order
-      )
-    );
-    try {
-      const response = await axios.put(PACKAGING_STATUS_API_URL, {
-        order_id: orderId,
-        item_id: selectedItem.itemId,
-        product_code: selectedItem.product_code,
-        quantity: selectedItem.quantity,
-        packaged: newStatus
-      });
-      const confirmedStatus = Boolean(response.data?.packaged);
-      pendingPackagingRef.current.set(selectedItem.storageKey, confirmedStatus);
-      setOrders((currentOrders) =>
-        currentOrders.map((order) =>
-          order.id === orderId
-            ? {
-                ...order,
-                items: order.items.map((item) =>
-                  item.itemId === selectedItem.itemId
-                    ? {
-                        ...item,
-                        packaged: confirmedStatus
-                      }
-                    : item
-                )
-              }
-            : order
-        )
-      );
-    } catch (error) {
-      console.error("Cannot update packaging status", error);
-      // Roll back the optimistic change when the server cannot save it.
-      pendingPackagingRef.current.set(selectedItem.storageKey, previousStatus);
-      setOrders((currentOrders) =>
-        currentOrders.map((order) =>
-          order.id === orderId
-            ? {
-                ...order,
-                items: order.items.map((item) =>
-                  item.itemId === selectedItem.itemId
-                    ? {
-                        ...item,
-                        packaged: previousStatus
-                      }
-                    : item
-                )
-              }
-            : order
-        )
-      );
-      window.alert("Packaging status was not saved. Please try again.");
-    } finally {
+  const setItemPackagingStatus = async (orderId,itemIndex,newStatus,showAlert=true) => {
+    const selectedOrder=orders.find(order=>order.id===orderId);
+    const selectedItem=selectedOrder?.items[itemIndex];
+    if(!selectedItem||updatingItemKeys.includes(selectedItem.storageKey))return false;
+    const previousStatus=Boolean(selectedItem.packaged);
+    if(previousStatus===newStatus)return true;
+    pendingPackagingRef.current.set(selectedItem.storageKey,newStatus);
+    setUpdatingItemKeys(currentKeys=>[...currentKeys,selectedItem.storageKey]);
+    setOrders(currentOrders=>currentOrders.map(order=>order.id===orderId?{...order,items:order.items.map((item,currentItemIndex)=>currentItemIndex===itemIndex?{...item,packaged:newStatus}:item)}:order));
+    try{
+      const response=await axios.put(PACKAGING_STATUS_API_URL,{order_id:orderId,item_id:selectedItem.itemId,product_code:selectedItem.product_code,quantity:selectedItem.quantity,packaged:newStatus});
+      const confirmedStatus=Boolean(response.data?.packaged);
+      pendingPackagingRef.current.set(selectedItem.storageKey,confirmedStatus);
+      setOrders(currentOrders=>currentOrders.map(order=>order.id===orderId?{...order,items:order.items.map(item=>item.itemId===selectedItem.itemId?{...item,packaged:confirmedStatus}:item)}:order));
+      return confirmedStatus===newStatus;
+    }catch(error){
+      console.error("Cannot update packaging status",error);
+      pendingPackagingRef.current.set(selectedItem.storageKey,previousStatus);
+      setOrders(currentOrders=>currentOrders.map(order=>order.id===orderId?{...order,items:order.items.map(item=>item.itemId===selectedItem.itemId?{...item,packaged:previousStatus}:item)}:order));
+      if(showAlert)window.alert("Packaging status was not saved. Please try again.");
+      return false;
+    }finally{
       pendingPackagingRef.current.delete(selectedItem.storageKey);
-      setUpdatingItemKeys((currentKeys) =>
-        currentKeys.filter((key) => key !== selectedItem.storageKey)
-      );
-      // Read the final shared value back from the backend.
+      setUpdatingItemKeys(currentKeys=>currentKeys.filter(key=>key!==selectedItem.storageKey));
       fetchApprovals(true);
     }
   };
+  const updateItem=(orderId,itemIndex)=>{
+    const item=orders.find(order=>order.id===orderId)?.items[itemIndex];
+    if(item)setItemPackagingStatus(orderId,itemIndex,!Boolean(item.packaged),true);
+  };
+  const revealScannedItem=(orderId,storageKey)=>{
+    setOpenRows(currentRows=>currentRows.includes(orderId)?currentRows:[...currentRows,orderId]);
+    markOrderAsSeen(orderId);
+    clearOrderChanges(orderId);
+    setHighlightedItemKey(storageKey);
+    if(scanHighlightTimerRef.current)clearTimeout(scanHighlightTimerRef.current);
+    scanHighlightTimerRef.current=setTimeout(()=>setHighlightedItemKey(null),SCAN_HIGHLIGHT_MS);
+    setTimeout(()=>{
+      const row=[...document.querySelectorAll("[data-scan-item-key]")].find(element=>element.dataset.scanItemKey===storageKey);
+      row?.scrollIntoView({behavior:"smooth",block:"center"});
+    },80);
+  };
+  const processScannedCode=useCallback(async rawCode=>{
+    const code=normalizeProductCode(rawCode);
+    setScanCode("");
+    if(!code){
+      setScanResult({type:"error",message:"No product code received"});
+      return;
+    }
+    const matches=[];
+    orders.forEach(order=>order.items.forEach((item,itemIndex)=>{
+      if(normalizeProductCode(item.product_code)===code)matches.push({order,item,itemIndex});
+    }));
+    if(matches.length===0){
+      setScanResult({type:"error",message:`${code} not found in any order`});
+      return;
+    }
+    const match=matches.find(result=>!result.item.packaged&&!updatingItemKeys.includes(result.item.storageKey))||matches[0];
+    revealScannedItem(match.order.id,match.item.storageKey);
+    if(match.item.packaged){
+      setScanResult({type:"warning",message:`${code} is already packed · ${match.order.name}`});
+      return;
+    }
+    setScanResult({type:"saving",message:`Packing ${code} · ${match.order.name}`});
+    const saved=await setItemPackagingStatus(match.order.id,match.itemIndex,true,false);
+    setScanResult(saved?{type:"success",message:`${code} packed · ${match.order.name}`}:{type:"error",message:`Failed to save ${code}`});
+  },[orders,updatingItemKeys]);
+
+  useEffect(()=>{
+    if(currentPage!=="packaging")return undefined;
+    const handleScannerKeyDown=event=>{
+      const target=event.target;
+      if(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target?.isContentEditable)return;
+      if(event.ctrlKey||event.altKey||event.metaKey)return;
+      if(event.key==="Enter"){
+        const code=scannerBufferRef.current;
+        scannerBufferRef.current="";
+        if(scannerResetTimerRef.current)clearTimeout(scannerResetTimerRef.current);
+        if(code){event.preventDefault();processScannedCode(code);}
+        return;
+      }
+      if(event.key.length!==1)return;
+      event.preventDefault();
+      scannerBufferRef.current+=event.key;
+      if(scannerResetTimerRef.current)clearTimeout(scannerResetTimerRef.current);
+      scannerResetTimerRef.current=setTimeout(()=>{scannerBufferRef.current="";},SCANNER_BUFFER_RESET_MS);
+    };
+    window.addEventListener("keydown",handleScannerKeyDown);
+    return()=>window.removeEventListener("keydown",handleScannerKeyDown);
+  },[currentPage,processScannedCode]);
   const getPackagingStatus = (items) => {
     if (items.length === 0) {
       return "No Items";
@@ -858,7 +871,11 @@ const playNotificationSound=useCallback(()=>{
                                     </tr>
                                   ) : (
                                     order.items.map((item, itemIndex) => (
-                                      <tr key={item.storageKey}>
+                                      <tr
+                                        key={item.storageKey}
+                                        data-scan-item-key={item.storageKey}
+                                        style={highlightedItemKey===item.storageKey?{background:"#dcfce7",outline:"3px solid #22c55e",outlineOffset:"-3px",scrollMarginTop:"120px"}:{scrollMarginTop:"120px"}}
+                                      >
                                         <td className="product-code">
                                           {item.product_code}
                                         </td>
@@ -936,6 +953,22 @@ const playNotificationSound=useCallback(()=>{
           </p>
         </div>
         <div className="header-actions">
+          <div style={{display:"flex",flexDirection:"column",gap:"5px",minWidth:"280px"}}>
+            <div style={{display:"flex",gap:"6px"}}>
+              <input
+                ref={scanInputRef}
+                value={scanCode}
+                onChange={event=>setScanCode(event.target.value)}
+                onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();processScannedCode(scanCode);}}}
+                placeholder="Scan product QR code"
+                autoComplete="off"
+                inputMode="none"
+                style={{flex:1,minWidth:0,padding:"10px 12px",border:"2px solid #0f766e",borderRadius:"8px",fontWeight:"700"}}
+              />
+              <button type="button" onClick={()=>processScannedCode(scanCode)} style={{padding:"10px 14px",border:"none",borderRadius:"8px",background:"#0f766e",color:"#fff",cursor:"pointer",fontWeight:"700"}}>Scan</button>
+            </div>
+            <div style={{fontSize:"12px",fontWeight:"700",color:scanResult.type==="success"?"#15803d":scanResult.type==="error"?"#dc2626":scanResult.type==="warning"?"#b45309":scanResult.type==="saving"?"#2563eb":"#475569"}}>{scanResult.message}</div>
+          </div>
           <button
             type="button"
             onClick={() => navigate("/open-invoice",{apiBaseUrl:API_BASE_URL})}
