@@ -19,6 +19,7 @@ const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
 const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
 const SERVER_SNAPSHOT_STORAGE_KEY = "packaging-server-snapshot";
 const ORDER_CHANGES_STORAGE_KEY = "packaging-order-changes";
+const NINE_TECH_PATTERN=/\b9[\s_-]*tech\b/i;
 
 const getPageFromPath=()=>location.pathname==="/credit-note-report"?"credit-note-report":location.pathname==="/open-invoice"?"open-invoice":"packaging";
 const normalizeProductCode=value=>String(value||"").replace(/[\r\n\t]/g,"").trim().toUpperCase();
@@ -26,6 +27,11 @@ const toQuantity=value=>Math.max(0,Number(value)||0);
 const clampPackedQuantity=(value,quantity)=>Math.min(toQuantity(quantity),toQuantity(value));
 const isItemFullyPackaged=item=>toQuantity(item?.quantity)>0&&toQuantity(item?.packedQuantity)>=toQuantity(item?.quantity);
 const getNextPackedQuantity=item=>isItemFullyPackaged(item)?0:Math.min(toQuantity(item?.quantity),toQuantity(item?.packedQuantity)+1);
+const isNineTechItem=item=>NINE_TECH_PATTERN.test(`${item?.product_code||""} ${item?.product_name||""}`);
+const hasMixedNineTechProducts=order=>{
+  const items=(order?.items||[]).filter(item=>toQuantity(item.quantity)>0);
+  return items.some(isNineTechItem)&&items.some(item=>!isNineTechItem(item));
+};
 const getProductPackagingLabel=(item,packedValue=item?.packedQuantity)=>{
   const total=toQuantity(item?.quantity);
   const packed=clampPackedQuantity(packedValue,total);
@@ -225,6 +231,7 @@ function App() {
   const justDraggedRef = useRef(false);
   const notificationAudioRef=useRef(null);
   const notifiedOrderIdsRef=useRef(new Set());
+  const alertedMixedNineTechOrderIdsRef=useRef(new Set());
   const autoScrollFrameRef = useRef(null);
   const dragPointerYRef = useRef(null);
   const dragScrollContainerRef = useRef(null);
@@ -323,13 +330,30 @@ const playNotificationSound=useCallback(()=>{
           items: formattedItems
         };
       });
+      const mixedNineTechOrders=formattedOrders.filter(hasMixedNineTechProducts);
+      const mixedNineTechOrderIds=new Set(mixedNineTechOrders.map(order=>order.id));
+      alertedMixedNineTechOrderIdsRef.current=new Set(
+        [...alertedMixedNineTechOrderIdsRef.current].filter(orderId=>mixedNineTechOrderIds.has(orderId))
+      );
+      const newlyMixedNineTechOrders=mixedNineTechOrders.filter(
+        order=>!alertedMixedNineTechOrderIdsRef.current.has(order.id)
+      );
+      if(newlyMixedNineTechOrders.length>0){
+        newlyMixedNineTechOrders.forEach(order=>alertedMixedNineTechOrderIdsRef.current.add(order.id));
+        const warningLines=newlyMixedNineTechOrders.map(
+          order=>`• ${order.name} (Order ${order.id})`
+        );
+        setTimeout(()=>window.alert(
+          `WARNING: The following order${newlyMixedNineTechOrders.length>1?"s contain":" contains"} both 9 Tech and non-9 Tech products:\n\n${warningLines.join("\n")}`
+        ),0);
+      }
       const currentSnapshot = buildServerSnapshot(formattedOrders);
       const previousSnapshot = serverSnapshotRef.current;
       const hasPreviousSnapshot = Object.keys(previousSnapshot).length > 0;
       const detectedChanges = hasPreviousSnapshot
         ? detectOrderChanges(previousSnapshot, currentSnapshot)
         : {};
-      let shouldPlayNotification=Object.keys(detectedChanges).length>0;
+      let shouldPlayNotification=Object.keys(detectedChanges).length>0||newlyMixedNineTechOrders.length>0;
       const fetchedOrderIds = formattedOrders.map((order) => order.id);
       setApprovingOrderIds((currentIds) => currentIds.filter((id) => fetchedOrderIds.includes(id)));
       setOrderChanges((currentChanges) => {
@@ -800,6 +824,7 @@ const playNotificationSound=useCallback(()=>{
                     isSendNowSection &&
                     isOrderFullyPackaged(order) &&
                     !isApproving;
+                  const hasMixedNineTech=hasMixedNineTechProducts(order);
                   return (
                     <Fragment key={order.id}>
                       <tr
@@ -833,6 +858,7 @@ const playNotificationSound=useCallback(()=>{
                           <div className="dealer-line">
                             <span className="order-name">{order.name}</span>
                             {isNew && <span className="new-badge">NEW</span>}
+                            {hasMixedNineTech&&<span title="This order contains both 9 Tech and non-9 Tech products" style={{display:"inline-flex",alignItems:"center",gap:"4px",padding:"3px 7px",borderRadius:"999px",background:"#fef3c7",color:"#b45309",border:"1px solid #f59e0b",fontSize:"11px",fontWeight:"800",whiteSpace:"nowrap"}}>⚠ 9 TECH MIXED</span>}
                           </div>
                           {order.date && (
                             <div className="order-date">{order.date}</div>
