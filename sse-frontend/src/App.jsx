@@ -596,10 +596,12 @@ const playNotificationSound=useCallback(()=>{
     if (approvingOrderIds.includes(order.id)) {
       return;
     }
-    const selectedItems = order.items
-      .flatMap(item=>Array.isArray(item.product_ids)?item.product_ids:[item.product_id])
-      .map(productId=>String(productId||"").trim())
-      .filter(Boolean);
+    const selectedItems = [...new Set(
+      order.items
+        .flatMap(item=>item.product_ids.length>0?item.product_ids:[item.product_id])
+        .map(productId=>String(productId||"").trim())
+        .filter(Boolean)
+    )];
     if (selectedItems.length === 0) {
       window.alert("No product IDs were found for approval.");
       return;
@@ -1029,4 +1031,3 @@ const playNotificationSound=useCallback(()=>{
     </div>
   );
 }
-export default App;
