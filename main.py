@@ -14,6 +14,8 @@ REQUEST_TIMEOUT_SECONDS=30
 SSE_APPROVALS_DATATABLE_URL="https://ssegroup.com.my/api/approvals/datatables"
 SSE_CREDITS_DATATABLE_URL="https://ssegroup.com.my/api/credits/datatables"
 SSE_CREDIT_DETAIL_URL="https://ssegroup.com.my/api/credits"
+SSE_SALES_URL="https://ssegroup.com.my/api/sales"
+NINE_TECH_PATTERN=re.compile(r"\b9[\s_-]*tech\b",re.IGNORECASE)
 
 def utc_now_iso():return datetime.now(timezone.utc).isoformat()
 
@@ -62,7 +64,7 @@ def parse_sse_json_response(response):
     except ValueError as error:raise RuntimeError("SSE returned a non-JSON response.") from error
 
 def build_approvals_payload():
-    return {"draw":"1","start":"0","length":"100","search[value]":json.dumps({"date_start":"","date_end":"","search":"","sale_branch":1,"sale_status":{"Pending":True,"Approved":False,"Rejected":False,"Invoiced":False,"NotInvoiced":False,"PreOrder":True,"Reserved":False},"sale_dealer":"","proforma_invoiced":False,"pro_forma_code":""}),"search[regex]":"false"}
+    return {"draw":"1","start":"0","length":"100","search[value]":json.dumps({"date_start":"","date_end":"","search":"","sale_branch":1,"sale_status":{"Pending":True,"Approved":False,"Rejected":False,"Invoiced":False,"NotInvoiced":False,"PreOrder":False,"Reserved":False},"sale_dealer":"","proforma_invoiced":False,"pro_forma_code":""}),"search[regex]":"false"}
 
 def build_approved_payload(date_start="",date_end=""):
     return {"draw":"1","start":"0","length":"100","search[value]":json.dumps({"date_start":date_start,"date_end":date_end,"search":"","sale_branch":1,"sale_status":{"Pending":False,"Approved":True,"Rejected":False,"Invoiced":False,"NotInvoiced":False,"PreOrder":False,"Reserved":False},"sale_dealer":"","proforma_invoiced":False,"pro_forma_code":""}),"search[regex]":"false"}
@@ -100,6 +102,99 @@ def make_unique_item_id(record,item_index,used_item_ids):
     used_item_ids[base]=occurrence+1
     return base if occurrence==0 else f"{base}::{occurrence}"
 
+def normalize_top_remark(value):
+    if value is None:return ""
+    if isinstance(value,(list,tuple)):
+        for item in value:
+            remark=normalize_top_remark(item)
+            if remark:return remark
+        return ""
+    if isinstance(value,dict):
+        for key in("remark","sale_remark","name","value"):
+            if key in value:
+                remark=normalize_top_remark(value.get(key))
+                if remark:return remark
+        return ""
+    text=str(value).strip()
+    if not text:return ""
+    try:
+        decoded=json.loads(text)
+        if isinstance(decoded,(list,dict)):return normalize_top_remark(decoded)
+    except(ValueError,TypeError,json.JSONDecodeError):pass
+    text=re.sub(r"<br\s*/?>","\n",text,flags=re.IGNORECASE)
+    lines=[re.sub(r"<[^>]*>","",line).strip() for line in text.splitlines()]
+    return next((line for line in lines if line),"")
+
+def extract_sale_record(payload):
+    data=payload.get("data",{}) if isinstance(payload,dict) else {}
+    if not isinstance(data,dict):return {}
+    for key in("record","sale"):
+        candidate=data.get(key)
+        if isinstance(candidate,dict):return candidate
+    return data
+
+def request_sale(session,sale_id,headers):
+    response=session.get(f"{SSE_SALES_URL}/{sale_id}",headers=headers,timeout=REQUEST_TIMEOUT_SECONDS)
+    sale=extract_sale_record(parse_sse_json_response(response))
+    records=sale.get("records",[]) if isinstance(sale,dict) else []
+    return sale,records if isinstance(records,list) else []
+
+def normalize_identity(value):return re.sub(r"\s+"," ",str(value or "").strip().lower())
+
+def extract_dealer_identity(sale):
+    if not isinstance(sale,dict):return ""
+    for key in("dealer","sale_dealer_detail","customer"):
+        nested=sale.get(key)
+        if isinstance(nested,dict):
+            for nested_key in("id","dealer_id","sale_dealer_id","customer_id","code","name"):
+                value=nested.get(nested_key)
+                if value not in(None,""):return normalize_identity(value)
+    for key in("dealer_id","sale_dealer_id","sale_dealer","customer_id","dealer_code","dealer_name"):
+        value=sale.get(key)
+        if isinstance(value,dict):
+            nested=extract_dealer_identity({"dealer":value})
+            if nested:return nested
+        elif value not in(None,""):return normalize_identity(value)
+    return ""
+
+def request_pending_order_metadata(session,headers):
+    response=session.post(SSE_APPROVALS_DATATABLE_URL,headers=headers,data=build_approvals_payload(),timeout=REQUEST_TIMEOUT_SECONDS)
+    rows=parse_sse_json_response(response).get("data",[])
+    metadata={}
+    for row in rows if isinstance(rows,list) else []:
+        try:
+            link=str(row[9]).split('href="',1)[1].split('"',1)[0]
+            sale_id=link.rstrip("/").split("/")[-1]
+            metadata[str(sale_id)]={"dealer":str(row[3] or "").strip(),"remark":normalize_top_remark(row[5])}
+        except(IndexError,TypeError,AttributeError):continue
+    return metadata
+
+def prepare_order_items(records):
+    items=[]
+    used_item_ids={}
+    for item_index,record in enumerate(records if isinstance(records,list) else []):
+        if not isinstance(record,dict):continue
+        product_id=str(record.get("sale_product") or record.get("product_id") or "").strip()
+        product_code=str(record.get("product_code","-"))
+        product_name=str(record.get("product_name","-"))
+        product_description=str(record.get("product_description") or product_name or "-")
+        items.append({"id":make_unique_item_id(record,item_index,used_item_ids),"product_id":product_id,"code":product_code,"name":product_name,"product_description":product_description,"qty":max(to_number(record.get("sale_qty")),0)})
+    return items
+
+def product_key(item):
+    product_id=normalize_identity(item.get("product_id"))
+    return f"id:{product_id}" if product_id else f"code:{normalize_identity(item.get('code'))}"
+
+def is_nine_tech_item(item):return bool(NINE_TECH_PATTERN.search(f"{item.get('code','')} {item.get('name','')} {item.get('product_description','')}"))
+
+def get_order_product_group(items):
+    positive_items=[item for item in items if to_number(item.get("qty"))>0]
+    if not positive_items:return "empty"
+    nine_tech_count=sum(1 for item in positive_items if is_nine_tech_item(item))
+    if nine_tech_count==len(positive_items):return "nine_tech"
+    if nine_tech_count==0:return "normal"
+    return "mixed"
+
 def to_number(value):
     try:
         number=float(value)
@@ -125,17 +220,66 @@ def get_shared_packaging_status(connection,order_id,item_id,product_code,current
 
 def build_order_items(connection,sale_id,records):
     items=[]
-    used_item_ids={}
-    for item_index,record in enumerate(records):
-        product_id=str(record.get("sale_product") or "").strip()
-        product_code=str(record.get("product_code","-"))
-        product_name=str(record.get("product_name","-"))
-        product_description=str(record.get("product_description") or product_name or "-")
-        item_id=make_unique_item_id(record,item_index,used_item_ids)
-        quantity=max(to_number(record.get("sale_qty")),0)
-        packaging=get_shared_packaging_status(connection,str(sale_id),item_id,product_code,quantity)
-        items.append({"id":item_id,"product_id":product_id,"code":product_code,"name":product_name,"product_description":product_description,"qty":quantity,"packed_quantity":packaging["packed_quantity"],"packaged":packaging["packaged"]})
+    for item in prepare_order_items(records):
+        packaging=get_shared_packaging_status(connection,str(sale_id),item["id"],item["code"],item["qty"])
+        items.append({**item,"packed_quantity":packaging["packed_quantity"],"packaged":packaging["packaged"]})
     return items
+
+def read_packaging_snapshot(connection,order_id,items):
+    snapshot={}
+    for item in items:
+        row=connection.execute("SELECT packed_quantity FROM packaging_status WHERE order_id=? AND item_id=?",(str(order_id),str(item["id"]))).fetchone()
+        snapshot[item["id"]]=clamp_packed_quantity(row["packed_quantity"] if row else 0,item["qty"])
+    return snapshot
+
+def upsert_packaging_status(connection,order_id,item,packed_quantity):
+    quantity=max(to_number(item["qty"]),0)
+    packed_quantity=clamp_packed_quantity(packed_quantity,quantity)
+    packaged=quantity>0 and packed_quantity>=quantity
+    connection.execute("""
+        INSERT INTO packaging_status(order_id,item_id,product_code,packaged,packed_quantity,last_quantity,updated_at)
+        VALUES(?,?,?,?,?,?,?)
+        ON CONFLICT(order_id,item_id) DO UPDATE SET
+            product_code=excluded.product_code,packaged=excluded.packaged,packed_quantity=excluded.packed_quantity,last_quantity=excluded.last_quantity,updated_at=excluded.updated_at
+    """,(str(order_id),str(item["id"]),str(item["code"]),int(packaged),packed_quantity,quantity,utc_now_iso()))
+
+def transfer_combined_packaging(connection,source_sale_id,target_sale_id,source_items,target_items_before,target_items_after,source_snapshot,target_snapshot):
+    source_groups={}
+    before_groups={}
+    after_groups={}
+    for item in source_items:source_groups.setdefault(product_key(item),[]).append(item)
+    for item in target_items_before:before_groups.setdefault(product_key(item),[]).append(item)
+    for item in target_items_after:after_groups.setdefault(product_key(item),[]).append(item)
+    for key,moved_items in source_groups.items():
+        after_items=after_groups.get(key,[])
+        if not after_items:raise RuntimeError(f"Unable to match added product {moved_items[0]['code']} in target order.")
+        previous_items=before_groups.get(key,[])
+        desired_total=sum(source_snapshot.get(item["id"],0) for item in moved_items)+sum(target_snapshot.get(item["id"],0) for item in previous_items)
+        allocations={}
+        for item in after_items:
+            allocations[item["id"]]=clamp_packed_quantity(target_snapshot.get(item["id"],0),item["qty"])
+        remaining=max(0,desired_total-sum(allocations.values()))
+        for item in after_items:
+            if remaining<=0:break
+            capacity=max(0,to_number(item["qty"])-allocations[item["id"]])
+            addition=min(capacity,remaining)
+            allocations[item["id"]]+=addition
+            remaining-=addition
+        if remaining>0:raise RuntimeError(f"Packaging quantity exceeds target quantity for product {moved_items[0]['code']}.")
+        for item in after_items:upsert_packaging_status(connection,target_sale_id,item,allocations[item["id"]])
+    after_ids=[str(item["id"]) for item in target_items_after]
+    if after_ids:
+        placeholders=",".join("?" for _ in after_ids)
+        connection.execute(f"DELETE FROM packaging_status WHERE order_id=? AND item_id NOT IN({placeholders})",[str(target_sale_id),*after_ids])
+    else:connection.execute("DELETE FROM packaging_status WHERE order_id=?",(str(target_sale_id),))
+
+def api_quantity(value):
+    number=to_number(value)
+    return str(int(number)) if isinstance(number,(int,float)) and float(number).is_integer() else str(number)
+
+def response_status_is_success(data):
+    if not isinstance(data,dict):return False
+    return data.get("status") in(True,1,"1","true","True")
 
 @app.route("/health",methods=["GET"])
 def health():return jsonify({"status":"ok"})
@@ -186,9 +330,8 @@ def approvals():
             for row in rows:
                 link=row[9].split('href="',1)[1].split('"',1)[0]
                 sale_id=link.rstrip("/").split("/")[-1]
-                sale_response=session.get(f"https://ssegroup.com.my/api/sales/{sale_id}",headers=headers,timeout=REQUEST_TIMEOUT_SECONDS)
-                records=parse_sse_json_response(sale_response).get("data",{}).get("record",{}).get("records",[])
-                result.append({"id":str(sale_id),"dealer":row[3],"remark":row[5],"date":row[8],"link":link,"items":build_order_items(connection,sale_id,records)})
+                sale,records=request_sale(session,sale_id,headers)
+                result.append({"id":str(sale_id),"dealer_id":extract_dealer_identity(sale) or normalize_identity(row[3]),"dealer":row[3],"remark":normalize_top_remark(row[5]),"date":row[8],"link":link,"items":build_order_items(connection,sale_id,records)})
         return jsonify(result)
     except requests.RequestException as error:
         app.logger.exception("SSE request failed")
@@ -199,6 +342,93 @@ def approvals():
     except sqlite3.Error as error:
         app.logger.exception("Packaging database error")
         return jsonify({"error":"Packaging status database error.","details":str(error)}),500
+
+@app.route("/combine-orders",methods=["POST"])
+def combine_orders():
+    body=request.get_json(silent=True)
+    if not isinstance(body,dict):return jsonify({"error":"JSON body is required."}),400
+    source_sale_id=str(body.get("source_sale_id","")).strip()
+    target_sale_id=str(body.get("target_sale_id","")).strip()
+    if not source_sale_id:return jsonify({"error":"source_sale_id is required."}),400
+    if not target_sale_id:return jsonify({"error":"target_sale_id is required."}),400
+    if source_sale_id==target_sale_id:return jsonify({"error":"An order cannot be combined into itself."}),400
+    session=build_sse_session()
+    headers=build_sse_headers(f"https://ssegroup.com.my/approvals/{target_sale_id}")
+    json_headers={**headers,"Content-Type":"application/json","Accept":"application/json, text/plain, */*"}
+    completed_items=0
+    try:
+        metadata=request_pending_order_metadata(session,headers)
+        source_sale,source_records=request_sale(session,source_sale_id,headers)
+        target_sale,target_records_before=request_sale(session,target_sale_id,headers)
+        source_items=prepare_order_items(source_records)
+        target_items_before=prepare_order_items(target_records_before)
+        source_dealer=extract_dealer_identity(source_sale) or normalize_identity(metadata.get(source_sale_id,{}).get("dealer"))
+        target_dealer=extract_dealer_identity(target_sale) or normalize_identity(metadata.get(target_sale_id,{}).get("dealer"))
+        if not source_dealer or not target_dealer:return jsonify({"error":"Unable to verify both dealer IDs. The orders were not changed."}),409
+        if source_dealer!=target_dealer:return jsonify({"error":"Orders from different dealers cannot be combined."}),409
+        source_group=get_order_product_group(source_items)
+        target_group=get_order_product_group(target_items_before)
+        if source_group=="empty":return jsonify({"error":"The dragging order has no products."}),400
+        if source_group=="mixed" or target_group=="mixed":return jsonify({"error":"An order containing mixed 9 Tech and normal products cannot be combined."}),409
+        if source_group!=target_group:return jsonify({"error":"9 Tech products cannot be combined with normal products."}),409
+        invalid_items=[item for item in source_items if not item["product_id"] or to_number(item["qty"])<=0]
+        if invalid_items:return jsonify({"error":"One or more source products have no valid product ID or quantity.","products":[item["code"] for item in invalid_items]}),400
+        with get_database_connection() as connection:
+            source_snapshot=read_packaging_snapshot(connection,source_sale_id,source_items)
+            target_snapshot=read_packaging_snapshot(connection,target_sale_id,target_items_before)
+        post_responses=[]
+        for item in source_items:
+            payload={"product_id":str(item["product_id"]),"sale_remark":"","sale_qty":api_quantity(item["qty"])}
+            response=session.post(f"{SSE_SALES_URL}/{target_sale_id}/records",headers=json_headers,json=payload,timeout=REQUEST_TIMEOUT_SECONDS)
+            data=parse_sse_json_response(response)
+            if not response_status_is_success(data):
+                return jsonify({"error":data.get("message") or f"Unable to add product {item['code']} to target order.","completed_items":completed_items,"source_removed":False,"target_updated":completed_items>0}),502
+            completed_items+=1
+            post_responses.append({"product_id":item["product_id"],"quantity":item["qty"],"response":data})
+        _,target_records_after=request_sale(session,target_sale_id,headers)
+        target_items_after=prepare_order_items(target_records_after)
+        with get_database_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            transfer_combined_packaging(connection,source_sale_id,target_sale_id,source_items,target_items_before,target_items_after,source_snapshot,target_snapshot)
+        reject_response=session.put(f"{SSE_SALES_URL}/{source_sale_id}/reject-with-proforma",headers=json_headers,json={},timeout=REQUEST_TIMEOUT_SECONDS)
+        reject_data=parse_sse_json_response(reject_response)
+        if not response_status_is_success(reject_data):
+            return jsonify({"error":reject_data.get("message") or "Products were added, but the source order could not be removed.","completed_items":completed_items,"source_removed":False,"target_updated":True}),502
+        with get_database_connection() as connection:
+            connection.execute("DELETE FROM packaging_status WHERE order_id=?",(source_sale_id,))
+        return jsonify({"status":True,"message":"Orders combined successfully.","source_sale_id":source_sale_id,"target_sale_id":target_sale_id,"dealer_id":source_dealer,"source_remark":metadata.get(source_sale_id,{}).get("remark","") or normalize_top_remark(source_sale.get("sale_remark")),"items_added":completed_items,"source_removed":True,"packaging_status_preserved":True,"post_responses":post_responses})
+    except PermissionError as error:
+        return jsonify({"error":str(error),"completed_items":completed_items,"source_removed":False}),401
+    except requests.RequestException as error:
+        app.logger.exception("SSE combine-order request failed")
+        return jsonify({"error":"Unable to complete the SSE combine request.","details":str(error),"completed_items":completed_items,"source_removed":False,"target_updated":completed_items>0}),502
+    except(sqlite3.Error,RuntimeError,KeyError,TypeError,ValueError,json.JSONDecodeError) as error:
+        app.logger.exception("Combine order failed")
+        return jsonify({"error":"Unable to safely combine the orders.","details":str(error),"completed_items":completed_items,"source_removed":False,"target_updated":completed_items>0}),500
+
+@app.route("/remove-order",methods=["POST"])
+def remove_order():
+    body=request.get_json(silent=True)
+    if not isinstance(body,dict):return jsonify({"error":"JSON body is required."}),400
+    sale_id=str(body.get("sale_id","")).strip()
+    if not sale_id:return jsonify({"error":"sale_id is required."}),400
+    session=build_sse_session()
+    headers=build_sse_headers(f"https://ssegroup.com.my/approvals/{sale_id}")
+    json_headers={**headers,"Content-Type":"application/json","Accept":"application/json, text/plain, */*"}
+    try:
+        response=session.put(f"{SSE_SALES_URL}/{sale_id}/reject-with-proforma",headers=json_headers,json={},timeout=REQUEST_TIMEOUT_SECONDS)
+        data=parse_sse_json_response(response)
+        if not response_status_is_success(data):return jsonify({"error":data.get("message") or "The order could not be removed."}),502
+        with get_database_connection() as connection:connection.execute("DELETE FROM packaging_status WHERE order_id=?",(sale_id,))
+        return jsonify({"status":True,"message":"Order removed successfully.","sale_id":sale_id})
+    except PermissionError as error:
+        return jsonify({"error":str(error)}),401
+    except requests.RequestException as error:
+        app.logger.exception("SSE remove-order request failed")
+        return jsonify({"error":"Unable to remove the SSE order.","details":str(error)}),502
+    except(sqlite3.Error,RuntimeError,KeyError,TypeError,ValueError,json.JSONDecodeError) as error:
+        app.logger.exception("Remove order failed")
+        return jsonify({"error":"Unable to safely remove the order.","details":str(error)}),500
 
 @app.route("/approve-order",methods=["POST"])
 def approve_order():

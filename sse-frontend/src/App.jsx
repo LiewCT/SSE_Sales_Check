@@ -4,17 +4,20 @@ import "./App.css";
 import PwaInstallButton from "./PwaInstallButton";
 import CreditNoteReport from "./CreditNoteReport";
 import OpenInvoice from "./OpenInvoice";
-const API_BASE_URL = "https://sse-sales-check.onrender.com";
-// const API_BASE_URL = "http://localhost:5000";
+// const API_BASE_URL = "https://sse-sales-check.onrender.com";
+const API_BASE_URL = "http://localhost:5000";
 const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
 const PACKAGING_STATUS_API_URL = `${API_BASE_URL}/packaging-status`;
 const APPROVE_ORDER_API_URL = `${API_BASE_URL}/approve-order`;
+const COMBINE_ORDERS_API_URL = `${API_BASE_URL}/combine-orders`;
+const REMOVE_ORDER_API_URL = `${API_BASE_URL}/remove-order`;
 const POLL_INTERVAL_MS = 3000;
 const CARD_HEIGHT_PX = 450;
 const AUTO_SCROLL_EDGE_PX = 90;
 const AUTO_SCROLL_MAX_SPEED = 50;
 const SCANNER_BUFFER_RESET_MS = 300;
 const SCAN_HIGHLIGHT_MS = 2500;
+const TRASH_PROXIMITY_DISTANCE_PX = 240;
 const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
 const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
 const SERVER_SNAPSHOT_STORAGE_KEY = "packaging-server-snapshot";
@@ -31,6 +34,27 @@ const isNineTechItem=item=>NINE_TECH_PATTERN.test(`${item?.product_code||""} ${i
 const hasMixedNineTechProducts=order=>{
   const items=(order?.items||[]).filter(item=>toQuantity(item.quantity)>0);
   return items.some(isNineTechItem)&&items.some(item=>!isNineTechItem(item));
+};
+const getOrderProductGroup=order=>{
+  const items=(order?.items||[]).filter(item=>toQuantity(item.quantity)>0);
+  if(items.length===0)return "empty";
+  const nineTechCount=items.filter(isNineTechItem).length;
+  if(nineTechCount===items.length)return "nine_tech";
+  if(nineTechCount===0)return "normal";
+  return "mixed";
+};
+const normalizeDealerKey=value=>String(value||"").trim().toLowerCase().replace(/\s+/g," ");
+const getDealerKey=order=>normalizeDealerKey(order?.dealer_id||order?.dealerId||order?.name);
+const getOrderMergeEligibility=(sourceOrder,targetOrder)=>{
+  if(!sourceOrder||!targetOrder)return {allowed:false,reason:"missing_order"};
+  if(sourceOrder.id===targetOrder.id)return {allowed:false,reason:"same_order"};
+  if(!sourceOrder.items?.length)return {allowed:false,reason:"no_items"};
+  if(!getDealerKey(sourceOrder)||getDealerKey(sourceOrder)!==getDealerKey(targetOrder))return {allowed:false,reason:"different_dealer"};
+  const sourceGroup=getOrderProductGroup(sourceOrder);
+  const targetGroup=getOrderProductGroup(targetOrder);
+  if(sourceGroup==="mixed"||targetGroup==="mixed")return {allowed:false,reason:"nine_tech_mixed"};
+  if(sourceGroup!==targetGroup)return {allowed:false,reason:"nine_tech_mismatch"};
+  return {allowed:true,reason:"allowed"};
 };
 const getProductPackagingLabel=(item,packedValue=item?.packedQuantity)=>{
   const total=toQuantity(item?.quantity);
@@ -217,6 +241,15 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [draggingOrderId, setDraggingOrderId] = useState(null);
   const [dragOverSection, setDragOverSection] = useState(null);
+  const [dragOverOrderId,setDragOverOrderId]=useState(null);
+  const [combineDialog,setCombineDialog]=useState(null);
+  const [combineError,setCombineError]=useState("");
+  const [isCombining,setIsCombining]=useState(false);
+  const [trashProximity,setTrashProximity]=useState(0);
+  const [isTrashDragOver,setIsTrashDragOver]=useState(false);
+  const [removeDialog,setRemoveDialog]=useState(null);
+  const [removeError,setRemoveError]=useState("");
+  const [isRemoving,setIsRemoving]=useState(false);
   const [orderChanges, setOrderChanges] = useState(() => getSavedObject(ORDER_CHANGES_STORAGE_KEY));
   const [updatingItemKeys, setUpdatingItemKeys] = useState([]);
   const [approvingOrderIds, setApprovingOrderIds] = useState([]);
@@ -228,6 +261,8 @@ function App() {
   const scanQueueRef=useRef(new Map());
   const serverSnapshotRef = useRef(getSavedObject(SERVER_SNAPSHOT_STORAGE_KEY));
   const isFetchingRef = useRef(false);
+  const isCombiningRef=useRef(false);
+  const isRemovingRef=useRef(false);
   const justDraggedRef = useRef(false);
   const notificationAudioRef=useRef(null);
   const notifiedOrderIdsRef=useRef(new Set());
@@ -239,6 +274,7 @@ function App() {
   const scannerBufferRef=useRef("");
   const scannerResetTimerRef=useRef(null);
   const scanHighlightTimerRef=useRef(null);
+  const trashZoneRef=useRef(null);
 
   const navigate=useCallback((path,state={})=>{
     window.history.pushState(state,"",path);
@@ -282,7 +318,7 @@ const playNotificationSound=useCallback(()=>{
   // Keep an optimistic value while the PUT request is running to prevent polling from changing the button back.
   const pendingPackagingRef = useRef(new Map());
   const fetchApprovals = useCallback(async (silent = false) => {
-    if (isFetchingRef.current) {
+    if (isFetchingRef.current||isCombiningRef.current||isRemovingRef.current) {
       return;
     }
     isFetchingRef.current = true;
@@ -322,6 +358,7 @@ const playNotificationSound=useCallback(()=>{
         });
         return {
           id: orderId,
+          dealer_id:String(order.dealer_id||order.dealerId||""),
           name: order.dealer || "Unknown Dealer",
           remark: order.remark,
           date: order.date,
@@ -683,7 +720,7 @@ const playNotificationSound=useCallback(()=>{
   };
   const updateDragAutoScroll = (event) => {
     dragPointerYRef.current = event.clientY;
-    dragScrollContainerRef.current = event.currentTarget.querySelector(".table-wrapper");
+    dragScrollContainerRef.current = event.currentTarget.closest?.(".table-wrapper")||event.currentTarget.querySelector?.(".table-wrapper")||null;
     if (!autoScrollFrameRef.current) {
       autoScrollFrameRef.current = requestAnimationFrame(runDragAutoScroll);
     }
@@ -692,22 +729,93 @@ const playNotificationSound=useCallback(()=>{
     stopDragAutoScroll();
     setDraggingOrderId(null);
     setDragOverSection(null);
+    setDragOverOrderId(null);
+    setTrashProximity(0);
+    setIsTrashDragOver(false);
     // Ignore the accidental click generated immediately after drag.
     setTimeout(() => {
       justDraggedRef.current = false;
     }, 180);
   };
   const handleDragStart = (event, orderId) => {
+    if(isCombining||isRemoving){event.preventDefault();return;}
     justDraggedRef.current = true;
     setDraggingOrderId(orderId);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", orderId);
+    event.dataTransfer.setData("application/x-sale-order-id",orderId);
   };
   const handleDragEnd = () => {
     resetDragState();
   };
+  useEffect(()=>{
+    if(!draggingOrderId)return undefined;
+    const updateTrashProximity=event=>{
+      const zone=trashZoneRef.current;
+      if(!zone)return;
+      const rect=zone.getBoundingClientRect();
+      const closestX=Math.max(rect.left,Math.min(event.clientX,rect.right));
+      const closestY=Math.max(rect.top,Math.min(event.clientY,rect.bottom));
+      const distance=Math.hypot(event.clientX-closestX,event.clientY-closestY);
+      const proximity=Math.max(0,Math.min(1,1-distance/TRASH_PROXIMITY_DISTANCE_PX));
+      setTrashProximity(proximity);
+      setIsTrashDragOver(distance===0);
+    };
+    window.addEventListener("dragover",updateTrashProximity,true);
+    return()=>window.removeEventListener("dragover",updateTrashProximity,true);
+  },[draggingOrderId]);
+  const handleTrashDragOver=event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect="move";
+    setTrashProximity(1);
+    setIsTrashDragOver(true);
+    setDragOverSection(null);
+    setDragOverOrderId(null);
+  };
+  const handleTrashDragLeave=event=>{
+    if(event.currentTarget.contains(event.relatedTarget))return;
+    setIsTrashDragOver(false);
+  };
+  const handleTrashDrop=event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    const orderId=event.dataTransfer.getData("application/x-sale-order-id")||event.dataTransfer.getData("text/plain")||draggingOrderId;
+    const order=ordersRef.current.find(item=>item.id===orderId);
+    resetDragState();
+    if(!order)return;
+    setRemoveError("");
+    setRemoveDialog(order);
+  };
+  const handleOrderDragOver=(event,targetOrder)=>{
+    event.preventDefault();
+    event.stopPropagation();
+    updateDragAutoScroll(event);
+    const sourceOrderId=draggingOrderId||event.dataTransfer.getData("application/x-sale-order-id")||event.dataTransfer.getData("text/plain");
+    const sourceOrder=ordersRef.current.find(order=>order.id===sourceOrderId);
+    const eligibility=getOrderMergeEligibility(sourceOrder,targetOrder);
+    event.dataTransfer.dropEffect=eligibility.allowed?"move":"none";
+    setDragOverSection(null);
+    setDragOverOrderId(targetOrder.id);
+  };
+  const handleOrderDragLeave=(event,targetOrderId)=>{
+    if(event.currentTarget.contains(event.relatedTarget))return;
+    setDragOverOrderId(currentId=>currentId===targetOrderId?null:currentId);
+  };
+  const handleOrderDrop=(event,targetOrder)=>{
+    event.preventDefault();
+    event.stopPropagation();
+    const sourceOrderId=event.dataTransfer.getData("application/x-sale-order-id")||event.dataTransfer.getData("text/plain")||draggingOrderId;
+    const sourceOrder=ordersRef.current.find(order=>order.id===sourceOrderId);
+    const eligibility=getOrderMergeEligibility(sourceOrder,targetOrder);
+    resetDragState();
+    if(!eligibility.allowed)return;
+    setCombineError("");
+    setCombineDialog({sourceOrder,targetOrder});
+  };
   const handleDragOver = (event, sectionType) => {
     updateDragAutoScroll(event);
+    setDragOverOrderId(null);
     const draggedOrder = orders.find((order) => order.id === draggingOrderId);
     if (!canDropIntoSection(draggedOrder, sectionType)) {
       event.dataTransfer.dropEffect = "none";
@@ -753,6 +861,76 @@ const playNotificationSound=useCallback(()=>{
       );
     }
     resetDragState();
+  };
+  const removeOrderFromLocalStorage=orderId=>{
+    const overrides=getSavedObject(ORDER_TYPE_STORAGE_KEY);
+    delete overrides[orderId];
+    saveObject(ORDER_TYPE_STORAGE_KEY,overrides);
+    saveArray(SEEN_ORDERS_STORAGE_KEY,getSavedArray(SEEN_ORDERS_STORAGE_KEY).filter(id=>id!==orderId));
+    const snapshot={...serverSnapshotRef.current};
+    delete snapshot[orderId];
+    serverSnapshotRef.current=snapshot;
+    saveObject(SERVER_SNAPSHOT_STORAGE_KEY,snapshot);
+    const changes=getSavedObject(ORDER_CHANGES_STORAGE_KEY);
+    delete changes[orderId];
+    saveObject(ORDER_CHANGES_STORAGE_KEY,changes);
+  };
+  const removeOrderFromView=orderId=>{
+    removeOrderFromLocalStorage(orderId);
+    setOpenRows(rows=>rows.filter(id=>id!==orderId));
+    setNewOrderIds(ids=>ids.filter(id=>id!==orderId));
+    setOrderChanges(changes=>{const next={...changes};delete next[orderId];return next;});
+    const nextOrders=ordersRef.current.filter(order=>order.id!==orderId);
+    ordersRef.current=nextOrders;
+    setOrders(nextOrders);
+  };
+  const confirmRemoveOrder=async()=>{
+    if(!removeDialog||isRemoving)return;
+    const latestOrder=ordersRef.current.find(order=>order.id===removeDialog.id)||removeDialog;
+    setRemoveError("");
+    setIsRemoving(true);
+    isRemovingRef.current=true;
+    try{
+      const response=await axios.post(REMOVE_ORDER_API_URL,{sale_id:String(latestOrder.id)});
+      if(response.data?.status!==true)throw new Error(response.data?.message||"The server did not confirm the removal.");
+      removeOrderFromView(latestOrder.id);
+      setRemoveDialog(null);
+    }catch(error){
+      console.error("Cannot remove order",error);
+      const data=error.response?.data;
+      setRemoveError(data?.error||data?.message||data?.details||error.message||"Unable to remove the order.");
+    }finally{
+      isRemovingRef.current=false;
+      setIsRemoving(false);
+      fetchApprovals(true);
+    }
+  };
+  const confirmCombineOrders=async()=>{
+    if(!combineDialog||isCombining)return;
+    const {sourceOrder,targetOrder}=combineDialog;
+    const latestSource=ordersRef.current.find(order=>order.id===sourceOrder.id)||sourceOrder;
+    const latestTarget=ordersRef.current.find(order=>order.id===targetOrder.id)||targetOrder;
+    const eligibility=getOrderMergeEligibility(latestSource,latestTarget);
+    if(!eligibility.allowed){setCombineError("These orders are no longer eligible to combine.");return;}
+    setCombineError("");
+    setIsCombining(true);
+    isCombiningRef.current=true;
+    try{
+      const response=await axios.post(COMBINE_ORDERS_API_URL,{source_sale_id:String(latestSource.id),target_sale_id:String(latestTarget.id)});
+      if(response.data?.status!==true)throw new Error(response.data?.message||"The server did not confirm the combine operation.");
+      removeOrderFromView(latestSource.id);
+      setCombineDialog(null);
+      window.alert(`Order ${latestSource.id} was combined into Order ${latestTarget.id}.`);
+    }catch(error){
+      console.error("Cannot combine orders",error);
+      const data=error.response?.data;
+      const partial=data?.completed_items?` ${data.completed_items} item(s) may already have been added; the source order was not removed.`:"";
+      setCombineError(`${data?.error||data?.message||error.message||"Unable to combine the orders."}${partial}`);
+    }finally{
+      isCombiningRef.current=false;
+      setIsCombining(false);
+      fetchApprovals(true);
+    }
   };
   const renderOrderCard = (section) => {
     const isDragOver = dragOverSection === section.type;
@@ -825,6 +1003,12 @@ const playNotificationSound=useCallback(()=>{
                     isOrderFullyPackaged(order) &&
                     !isApproving;
                   const hasMixedNineTech=hasMixedNineTechProducts(order);
+                  const mergeEligibility=draggedOrder?getOrderMergeEligibility(draggedOrder,order):null;
+                  const isMergeCandidate=Boolean(draggingOrderId&&order.id!==draggingOrderId);
+                  const isMergeAllowed=Boolean(isMergeCandidate&&mergeEligibility?.allowed);
+                  const isMergeBlocked=Boolean(isMergeCandidate&&!mergeEligibility?.allowed);
+                  const isMergeHovered=dragOverOrderId===order.id;
+                  const isNineTechBlockedHover=Boolean(isMergeHovered&&isMergeBlocked&&["nine_tech_mismatch","nine_tech_mixed"].includes(mergeEligibility?.reason));
                   return (
                     <Fragment key={order.id}>
                       <tr
@@ -833,12 +1017,19 @@ const playNotificationSound=useCallback(()=>{
                           ${orderType}
                           ${isOpen ? "is-open" : "is-closed"}
                           ${isNew ? "is-new" : ""}
-                          ${isDragging ? "is-dragging" : ""}
+                          ${isDragging ? "is-dragging merge-source" : ""}
+                          ${isMergeAllowed ? "merge-target-allowed" : ""}
+                          ${isMergeBlocked ? "merge-target-blocked" : ""}
+                          ${isMergeHovered&&isMergeAllowed ? "merge-drag-over-allowed" : ""}
+                          ${isMergeHovered&&isMergeBlocked ? "merge-drag-over-blocked" : ""}
                         `}
-                        draggable
+                        draggable={!isCombining&&!isRemoving}
                         onDragStart={(event) =>
                           handleDragStart(event, order.id)
                         }
+                        onDragOver={event=>handleOrderDragOver(event,order)}
+                        onDragLeave={event=>handleOrderDragLeave(event,order.id)}
+                        onDrop={event=>handleOrderDrop(event,order)}
                         onDragEnd={handleDragEnd}
                         onClick={() => {
                           if (justDraggedRef.current) {
@@ -859,6 +1050,7 @@ const playNotificationSound=useCallback(()=>{
                             <span className="order-name">{order.name}</span>
                             {isNew && <span className="new-badge">NEW</span>}
                             {hasMixedNineTech&&<span title="This order contains both 9 Tech and non-9 Tech products" style={{display:"inline-flex",alignItems:"center",gap:"4px",padding:"3px 7px",borderRadius:"999px",background:"#fef3c7",color:"#b45309",border:"1px solid #f59e0b",fontSize:"11px",fontWeight:"800",whiteSpace:"nowrap"}}>⚠ 9 TECH MIXED</span>}
+                            {isNineTechBlockedHover&&<span className="nine-tech-drop-warning">9TECH</span>}
                           </div>
                           {order.date && (
                             <div className="order-date">{order.date}</div>
@@ -902,7 +1094,12 @@ const playNotificationSound=useCallback(()=>{
                         )}
                       </tr>
                       {isOpen && (
-                        <tr className={`detail ${orderType}`}>
+                        <tr
+                          className={`detail ${orderType} ${isMergeAllowed?"merge-target-allowed":""} ${isMergeBlocked?"merge-target-blocked":""} ${isMergeHovered&&isMergeAllowed?"merge-drag-over-allowed":""} ${isMergeHovered&&isMergeBlocked?"merge-drag-over-blocked":""}`}
+                          onDragOver={event=>handleOrderDragOver(event,order)}
+                          onDragLeave={event=>handleOrderDragLeave(event,order.id)}
+                          onDrop={event=>handleOrderDrop(event,order)}
+                        >
                           <td colSpan={tableColumnCount}>
                             <div className="item-container">
                               <table className="item-table">
@@ -988,8 +1185,29 @@ const playNotificationSound=useCallback(()=>{
     return <OpenInvoice apiBaseUrl={pageApiBaseUrl} onBack={()=>navigate("/",{apiBaseUrl:API_BASE_URL})}/>;
   }
 
+  const trashGlowAlpha=(trashProximity*0.78).toFixed(3);
+  const trashGlowSoft=(trashProximity*0.34).toFixed(3);
+  const trashGlowSize=`${12+Math.round(trashProximity*44)}px`;
+  const pageLeftPadding=12+Math.round(Math.max(0,trashProximity-0.12)/0.88*76);
+
   return (
-    <div className="page">
+    <div
+      className={`page packaging-page ${draggingOrderId?"trash-mode":""} ${trashProximity>0.12?"trash-near":""}`}
+      style={{paddingLeft:`${pageLeftPadding}px`,"--trash-proximity":trashProximity}}
+    >
+      <div
+        ref={trashZoneRef}
+        className={`trash-drop-zone ${draggingOrderId?"visible":""} ${isTrashDragOver?"ready":""}`}
+        style={{"--trash-glow-alpha":trashGlowAlpha,"--trash-glow-soft":trashGlowSoft,"--trash-glow-size":trashGlowSize}}
+        onDragOver={handleTrashDragOver}
+        onDragLeave={handleTrashDragLeave}
+        onDrop={handleTrashDrop}
+        aria-label="Remove order"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-.8 11H7.8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/>
+        </svg>
+      </div>
       <div className="page-header">
         <div>
           <h2>Packaging Queue</h2>
@@ -1054,6 +1272,37 @@ const playNotificationSound=useCallback(()=>{
       <div className="card-grid">
         {orderSectionsWithOrders.map(renderOrderCard)}
       </div>
+      {removeDialog&&<div className="remove-modal-backdrop" role="presentation">
+        <div className="remove-modal" role="dialog" aria-modal="true" aria-labelledby="remove-order-title">
+          <div className="remove-modal-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-.8 11H7.8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg>
+          </div>
+          <h3 id="remove-order-title">Remove Order?</h3>
+          <p>Order <strong>{removeDialog.id}</strong> from <strong>{removeDialog.name}</strong> will be rejected and removed.</p>
+          {removeError&&<div className="remove-error">{removeError}</div>}
+          <div className="remove-actions">
+            <button type="button" className="remove-cancel" disabled={isRemoving} onClick={()=>{setRemoveDialog(null);setRemoveError("");}}>Cancel</button>
+            <button type="button" className="remove-confirm" disabled={isRemoving} onClick={confirmRemoveOrder}>{isRemoving?"Removing...":"Remove"}</button>
+          </div>
+        </div>
+      </div>}
+      {combineDialog&&<div className="combine-modal-backdrop" role="presentation">
+        <div className="combine-modal" role="dialog" aria-modal="true" aria-labelledby="combine-order-title">
+          <h3 id="combine-order-title">Combine Orders?</h3>
+          <p>Move all products and packaging progress from <strong>Order {combineDialog.sourceOrder.id}</strong> to <strong>Order {combineDialog.targetOrder.id}</strong>.</p>
+          <div className="combine-summary">
+            <div><span>Dealer</span><strong>{combineDialog.sourceOrder.name}</strong></div>
+            <div><span>Source remark</span><strong>{combineDialog.sourceOrder.remark||"-"}</strong></div>
+            <div><span>Products</span><strong>{combineDialog.sourceOrder.items.length}</strong></div>
+          </div>
+          <p className="combine-danger">After every product is added successfully, the source order will be rejected and removed.</p>
+          {combineError&&<div className="combine-error">{combineError}</div>}
+          <div className="combine-actions">
+            <button type="button" className="combine-cancel" disabled={isCombining} onClick={()=>{setCombineDialog(null);setCombineError("");}}>Cancel</button>
+            <button type="button" className="combine-confirm" disabled={isCombining} onClick={confirmCombineOrders}>{isCombining?"Combining...":"Combine"}</button>
+          </div>
+        </div>
+      </div>}
     </div>
   );
 }
