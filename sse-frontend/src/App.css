@@ -202,7 +202,7 @@ h2 {margin:0;font-size:32px;}
 @media (max-width:650px) {.combine-modal {padding:17px;}.combine-modal h3 {font-size:20px;}.combine-actions button {flex:1;}}
 /* DRAG-TO-REMOVE TRASH */
 .packaging-page {padding-right:12px;padding-bottom:24px;transition:padding-left 0.24s ease-in-out;}
-.trash-drop-zone {position:fixed;top:50%;left:7px;z-index:950;display:flex;align-items:center;justify-content:center;width:46px;height:58px;border:2px solid #111111;border-radius:23px;background:#ffffff;color:#111111;opacity:0;visibility:hidden;pointer-events:none;transform:translate(-12px,-50%);transition:opacity 0.16s ease,visibility 0.16s ease,transform 0.24s ease-in-out,width 0.24s ease-in-out,height 0.24s ease-in-out;border-radius 0.24s ease-in-out;}
+.trash-drop-zone {position:fixed;top:50%;left:7px;z-index:950;display:flex;align-items:center;justify-content:center;width:46px;height:58px;border:2px solid #111111;border-radius:23px;background:#ffffff;color:#111111;opacity:0;visibility:hidden;pointer-events:none;transform:translate(-12px,-50%);transition:opacity 0.16s ease,visibility 0.16s ease,transform 0.24s ease-in-out,width 0.24s ease-in-out,height 0.24s ease-in-out,border-radius 0.24s ease-in-out;}
 .trash-drop-zone::before {position:absolute;top:50%;left:50%;z-index:-1;width:calc(68px + var(--trash-glow-size));height:calc(68px + var(--trash-glow-size));content:"";border-radius:50%;background:radial-gradient(circle,rgba(220,38,38,var(--trash-glow-alpha)) 0%,rgba(220,38,38,var(--trash-glow-soft)) 42%,rgba(220,38,38,0) 73%);transform:translate(-50%,-50%);pointer-events:none;}
 .trash-drop-zone.visible {opacity:1;visibility:visible;pointer-events:auto;transform:translate(0,-50%);}
 .trash-drop-zone.ready {width:58px;height:70px;border-radius:29px;}
