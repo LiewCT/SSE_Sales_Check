@@ -7,8 +7,8 @@
 // @match        https://www.ssegroup.com.my/dealers/orders/new*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/LiewCT/SSE_Sales_Check/new/main/sse-tampermonkey.user.js
-// @downloadURL  https://raw.githubusercontent.com/LiewCT/SSE_Sales_Check/new/main/sse-tampermonkey.user.js
+// @updateURL    https://raw.githubusercontent.com/LiewCT/SSE_Sales_Check/main/sse-tampermonkey.user.js
+// @downloadURL  https://raw.githubusercontent.com/LiewCT/SSE_Sales_Check/main/sse-tampermonkey.user.js
 // ==/UserScript==
 
 (() => {
