@@ -328,7 +328,7 @@ def approvals():
         with get_database_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             for row in rows:
-                link=row[9].split('href="',1)[1].split('"',1)[0]
+                link=row[10].split('href="',1)[1].split('"',1)[0]
                 sale_id=link.rstrip("/").split("/")[-1]
                 sale,records=request_sale(session,sale_id,headers)
                 result.append({"id":str(sale_id),"dealer_id":extract_dealer_identity(sale) or normalize_identity(row[3]),"dealer":row[3],"remark":normalize_top_remark(row[5]),"date":row[8],"link":link,"items":build_order_items(connection,sale_id,records)})
@@ -549,7 +549,7 @@ def open_invoices():
         with get_database_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             for row in rows:
-                link=row[9].split('href="',1)[1].split('"',1)[0]
+                link=row[10].split('href="',1)[1].split('"',1)[0]
                 sale_id=link.rstrip("/").split("/")[-1]
                 sale_response=session.get(f"https://ssegroup.com.my/api/sales/{sale_id}",headers=headers,timeout=REQUEST_TIMEOUT_SECONDS)
                 records=parse_sse_json_response(sale_response).get("data",{}).get("record",{}).get("records",[])
