@@ -163,7 +163,7 @@ def request_pending_order_metadata(session,headers):
     metadata={}
     for row in rows if isinstance(rows,list) else []:
         try:
-            link=str(row[9]).split('href="',1)[1].split('"',1)[0]
+            link=str(row[10]).split('href="',1)[1].split('"',1)[0]
             sale_id=link.rstrip("/").split("/")[-1]
             metadata[str(sale_id)]={"dealer":str(row[3] or "").strip(),"remark":normalize_top_remark(row[5])}
         except(IndexError,TypeError,AttributeError):continue
