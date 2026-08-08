@@ -331,7 +331,7 @@ def approvals():
                 link=row[10].split('href="',1)[1].split('"',1)[0]
                 sale_id=link.rstrip("/").split("/")[-1]
                 sale,records=request_sale(session,sale_id,headers)
-                result.append({"id":str(sale_id),"dealer_id":extract_dealer_identity(sale) or normalize_identity(row[3]),"dealer":row[3],"remark":normalize_top_remark(row[5]),"date":row[8],"link":link,"items":build_order_items(connection,sale_id,records)})
+                result.append({"id":str(sale_id),"dealer_id":extract_dealer_identity(sale) or normalize_identity(row[3]),"dealer":row[3],"remark":normalize_top_remark(row[5]),"date":row[7],"link":link,"items":build_order_items(connection,sale_id,records)})
         return jsonify(result)
     except requests.RequestException as error:
         app.logger.exception("SSE request failed")
@@ -485,7 +485,7 @@ def credit_note_report():
             remark=str(row[5] or "").strip()
             normalized_remark=normalize_credit_remark(remark)
             category="no_problem_cn" if normalized_remark=="NOPROBLEMCN" else "problem_cn" if normalized_remark=="PROBLEMCN" else "others"
-            credit_note_id=extract_credit_note_id(row[8])
+            credit_note_id=extract_credit_note_id(row[7])
             if not credit_note_id or credit_note_id in used_credit_note_ids:continue
             used_credit_note_ids.add(credit_note_id)
             dealer_name=str(row[3] or "-").strip() or "-"
@@ -553,7 +553,7 @@ def open_invoices():
                 sale_id=link.rstrip("/").split("/")[-1]
                 sale_response=session.get(f"https://ssegroup.com.my/api/sales/{sale_id}",headers=headers,timeout=REQUEST_TIMEOUT_SECONDS)
                 records=parse_sse_json_response(sale_response).get("data",{}).get("record",{}).get("records",[])
-                result.append({"id":str(sale_id),"dealer":row[3],"remark":row[5],"date":row[8],"link":link,"items":build_order_items(connection,sale_id,records)})
+                result.append({"id":str(sale_id),"dealer":row[3],"remark":row[5],"date":row[7],"link":link,"items":build_order_items(connection,sale_id,records)})
         return jsonify(result)
     except requests.RequestException as error:
         app.logger.exception("SSE approved-order request failed")
