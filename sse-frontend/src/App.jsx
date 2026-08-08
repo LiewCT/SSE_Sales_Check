@@ -22,7 +22,7 @@ const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
 const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
 const SERVER_SNAPSHOT_STORAGE_KEY = "packaging-server-snapshot";
 const ORDER_CHANGES_STORAGE_KEY = "packaging-order-changes";
-const NINE_TECH_PATTERN=/\b9[\s_-]*tech\b/i;
+const NINE_TECH_PATTERN=/9[\s_-]*tech\b/i;
 
 const getPageFromPath=()=>location.pathname==="/credit-note-report"?"credit-note-report":location.pathname==="/open-invoice"?"open-invoice":"packaging";
 const normalizeProductCode=value=>String(value||"").replace(/[\r\n\t]/g,"").trim().toUpperCase();
@@ -30,7 +30,7 @@ const toQuantity=value=>Math.max(0,Number(value)||0);
 const clampPackedQuantity=(value,quantity)=>Math.min(toQuantity(quantity),toQuantity(value));
 const isItemFullyPackaged=item=>toQuantity(item?.quantity)>0&&toQuantity(item?.packedQuantity)>=toQuantity(item?.quantity);
 const getNextPackedQuantity=item=>isItemFullyPackaged(item)?0:Math.min(toQuantity(item?.quantity),toQuantity(item?.packedQuantity)+1);
-const isNineTechItem=item=>NINE_TECH_PATTERN.test(`${item?.product_code||""} ${item?.product_name||""}`);
+const isNineTechItem=item=>NINE_TECH_PATTERN.test(`${item?.product_code||""} ${item?.product_name||""} ${item?.product_description||""}`);
 const hasMixedNineTechProducts=order=>{
   const items=(order?.items||[]).filter(item=>toQuantity(item.quantity)>0);
   return items.some(isNineTechItem)&&items.some(item=>!isNineTechItem(item));
@@ -350,6 +350,7 @@ const playNotificationSound=useCallback(()=>{
             product_ids:Array.isArray(item.product_ids)?item.product_ids.map(productId=>String(productId||"")).filter(Boolean):[],
             product_code:item.code||"-",
             product_name:item.name||"-",
+            product_description:item.product_description||"",
             quantity,
             packedQuantity,
             storageKey,

@@ -10,154 +10,91 @@
 // @updateURL    https://raw.githubusercontent.com/LiewCT/SSE_Sales_Check/main/sse-tampermonkey.user.js
 // @downloadURL  https://raw.githubusercontent.com/LiewCT/SSE_Sales_Check/main/sse-tampermonkey.user.js
 // ==/UserScript==
-
-(() => {
+ (() => {
   'use strict';
-
-
-  /*
+   /*
    * ==========================================
    * SETTINGS
    * ==========================================
    */
-
-  const UPDATE_INTERVAL = 500;
-
-
-  /*
+   const UPDATE_INTERVAL = 500;
+   /*
    * ==========================================
    * STYLES
    * ==========================================
    */
-
-  function addStyles() {
-
-    if (
+   function addStyles() {
+     if (
       document.getElementById('tm-sse-style')
     ) {
       return;
     }
-
-
-    const style =
+     const style =
       document.createElement('style');
-
-
-    style.id =
+     style.id =
       'tm-sse-style';
-
-
-    style.textContent = `
-
-      /*
+     style.textContent = `
+       /*
        * ==============================
        * NO STOCK
        * ==============================
        */
-
-      @keyframes tmStockWarning {
-
-        0%, 100% {
+       @keyframes tmStockWarning {
+         0%, 100% {
           opacity: 1;
           transform: scale(1);
         }
-
-        50% {
+         50% {
           opacity: .3;
           transform: scale(1.1);
         }
-
-      }
-
-
-      .tm-no-stock {
-
-        color: #dc3545 !important;
-
-        font-size: 16px !important;
-
-        font-weight: bold !important;
-
-        white-space: nowrap;
-
-        animation:
+       }
+       .tm-no-stock {
+         color: #dc3545 !important;
+         font-size: 16px !important;
+         font-weight: bold !important;
+         white-space: nowrap;
+         animation:
           tmStockWarning .8s infinite;
-
-      }
-
-
-      /*
+       }
+       /*
        * ==============================
        * DISCOUNT
        * ==============================
        */
-
-      .tm-discount-price {
-
-        width: 105px;
-
-        min-width: 105px;
-
-        padding: 4px !important;
-
-        text-align: center;
-
-        white-space: nowrap;
-
-      }
-
-
-      .tm-discount-value {
-
-        color: #198754;
-
-        font-size: 18px;
-
-        font-weight: bold;
-
-      }
-
-
-      /*
+       .tm-discount-price {
+         width: 105px;
+         min-width: 105px;
+         padding: 4px !important;
+         text-align: center;
+         white-space: nowrap;
+       }
+       .tm-discount-value {
+         color: #198754;
+         font-size: 18px;
+         font-weight: bold;
+       }
+       /*
        * ==============================
        * COPY BUTTON
        * ==============================
        */
-
-      .tm-copy-btn {
-
-        margin-left: 7px;
-
-        padding: 2px 5px;
-
-        border: 0;
-
-        background: transparent;
-
-        color: #007bff;
-
-        font-size: 15px;
-
-        cursor: pointer;
-
-      }
-
-
-      .tm-copy-btn:hover {
-
-        transform: scale(1.2);
-
-      }
-
-
-      .tm-copy-success {
-
-        color: #198754 !important;
-
-      }
-
-
-      /*
+       .tm-copy-btn {
+         margin-left: 7px;
+         padding: 2px 5px;
+         border: 0;
+         background: transparent;
+         color: #007bff;
+         font-size: 15px;
+         cursor: pointer;
+       }
+       .tm-copy-btn:hover {
+         transform: scale(1.2);
+       }
+       .tm-copy-success {
+         color: #198754 !important;
+       }
+       /*
        * ==============================
        * CODE DIFFERENCE
        * ==============================
@@ -165,561 +102,354 @@
        * Red font only.
        * No background.
        */
-
-      .tm-code-difference {
-
-        color: #dc3545 !important;
-
-        font-weight: bold;
-
-      }
-
-
-      /*
+       .tm-code-difference {
+         color: #dc3545 !important;
+         font-weight: bold;
+       }
+       /*
        * ==============================
        * SEARCH MATCH
        * ==============================
        *
        * Red font only.
        */
-
-      .tm-search-match {
-
-        color: #dc3545 !important;
-
-        font-weight: bold;
-
-      }
-
-    `;
-
-
-    document.head.appendChild(
+       .tm-search-match {
+         color: #dc3545 !important;
+         font-weight: bold;
+       }
+     `;
+     document.head.appendChild(
       style
     );
   }
-
-
-  /*
+   /*
    * ==========================================
    * COPY PURE TEXT
    * ==========================================
    */
-
-  async function copyPureText(
+   async function copyPureText(
     value,
     button
   ) {
-
-    const text =
+     const text =
       String(value).trim();
-
-
-    try {
-
-      /*
+     try {
+       /*
        * Copy ONLY plain text.
        */
-
-      await navigator.clipboard.writeText(
+       await navigator.clipboard.writeText(
         text
       );
-
-    } catch (error) {
-
-      /*
+     } catch (error) {
+       /*
        * Fallback.
        */
-
-      const textarea =
+       const textarea =
         document.createElement(
           'textarea'
         );
-
-
-      textarea.value =
+       textarea.value =
         text;
-
-
-      textarea.setAttribute(
+       textarea.setAttribute(
         'readonly',
         ''
       );
-
-
-      textarea.style.position =
+       textarea.style.position =
         'fixed';
-
-
-      textarea.style.left =
+       textarea.style.left =
         '-9999px';
-
-
-      textarea.style.top =
+       textarea.style.top =
         '0';
-
-
-      document.body.appendChild(
+       document.body.appendChild(
         textarea
       );
-
-
-      textarea.select();
-
-
-      textarea.setSelectionRange(
+       textarea.select();
+       textarea.setSelectionRange(
         0,
         textarea.value.length
       );
-
-
-      try {
-
-        document.execCommand(
+       try {
+         document.execCommand(
           'copy'
         );
-
-      } catch (e) {
-
-        console.error(
+       } catch (e) {
+         console.error(
           'Copy failed:',
           e
         );
-
-      }
-
-
-      textarea.remove();
+       }
+       textarea.remove();
     }
-
-
-    /*
+     /*
      * Show copied status.
      */
-
-    const originalHTML =
+     const originalHTML =
       button.innerHTML;
-
-
-    button.innerHTML =
+     button.innerHTML =
       '✓';
-
-
-    button.classList.add(
+     button.classList.add(
       'tm-copy-success'
     );
-
-
-    setTimeout(() => {
-
-      button.innerHTML =
+     setTimeout(() => {
+       button.innerHTML =
         originalHTML;
-
-
-      button.classList.remove(
+       button.classList.remove(
         'tm-copy-success'
       );
-
-    }, 1000);
-
-  }
-
-
-  /*
+     }, 1000);
+   }
+   /*
    * ==========================================
    * COMMON PREFIX
    * ==========================================
    */
-
-  function commonPrefix(
+   function commonPrefix(
     values
   ) {
-
-    if (
+     if (
       !values.length
     ) {
-
-      return '';
-
-    }
-
-
-    let prefix =
+       return '';
+     }
+     let prefix =
       values[0];
-
-
-    for (
+     for (
       const value of values.slice(1)
     ) {
-
-      while (
+       while (
         prefix &&
         !value.startsWith(prefix)
       ) {
-
-        prefix =
+         prefix =
           prefix.slice(0, -1);
-
-      }
-
-    }
-
-
-    return prefix;
+       }
+     }
+     return prefix;
   }
-
-
-  /*
+   /*
    * ==========================================
    * COMMON SUFFIX
    * ==========================================
    */
-
-  function commonSuffix(
+   function commonSuffix(
     values,
     prefixLength
   ) {
-
-    if (
+     if (
       !values.length
     ) {
-
-      return '';
-
-    }
-
-
-    let suffix =
+       return '';
+     }
+     let suffix =
       values[0].slice(
         prefixLength
       );
-
-
-    for (
+     for (
       const value of values.slice(1)
     ) {
-
-      const remaining =
+       const remaining =
         value.slice(
           prefixLength
         );
-
-
-      while (
+       while (
         suffix &&
         !remaining.endsWith(
           suffix
         )
       ) {
-
-        suffix =
+         suffix =
           suffix.slice(1);
-
-      }
-
-    }
-
-
-    return suffix;
+       }
+     }
+     return suffix;
   }
-
-
-  /*
+   /*
    * ==========================================
    * CODE DIFFERENCE HIGHLIGHT
    * ==========================================
    */
-
-  function highlightCodeDifferences(
+   function highlightCodeDifferences(
     rows
   ) {
-
-    const codes = [];
-
-
-    /*
+     const codes = [];
+     /*
      * Get original codes.
      *
      * Code column = children[2]
      */
-
-    rows.forEach(row => {
-
-      const cell =
+     rows.forEach(row => {
+       const cell =
         row.children[2];
-
-
-      if (!cell) {
+       if (!cell) {
         return;
       }
-
-
-      /*
+       /*
        * Save original code ONLY ONCE.
        */
-
-      if (
+       if (
         cell.dataset.originalCode ===
         undefined
       ) {
-
-        cell.dataset.originalCode =
+         cell.dataset.originalCode =
           cell.textContent.trim();
-
-      }
-
-
-      const code =
+       }
+       const code =
         cell.dataset.originalCode;
-
-
-      if (code) {
-
-        codes.push(
+       if (code) {
+         codes.push(
           code
         );
-
-      }
-
-    });
-
-
-    /*
+       }
+     });
+     /*
      * Unique codes.
      */
-
-    const uniqueCodes =
+     const uniqueCodes =
       [
         ...new Set(codes)
       ];
-
-
-    /*
+     /*
      * Less than 2 different codes.
      */
-
-    if (
+     if (
       uniqueCodes.length < 2
     ) {
-
-      rows.forEach(row => {
-
-        const cell =
+       rows.forEach(row => {
+         const cell =
           row.children[2];
-
-
-        if (!cell) {
+         if (!cell) {
           return;
         }
-
-
-        const original =
+         const original =
           cell.dataset.originalCode;
-
-
-        if (
+         if (
           original &&
           cell.dataset.highlighted ===
           'true'
         ) {
-
-          cell.textContent =
+           cell.textContent =
             original;
-
-
-          cell.dataset.highlighted =
+           cell.dataset.highlighted =
             'false';
-
-
-          cell.dataset.highlightSignature =
+           cell.dataset.highlightSignature =
             '';
-
-        }
-
-      });
-
-
-      return;
+         }
+       });
+       return;
     }
-
-
-    /*
+     /*
      * Find common beginning.
      */
-
-    const prefix =
+     const prefix =
       commonPrefix(
         uniqueCodes
       );
-
-
-    /*
+     /*
      * Find common ending.
      */
-
-    const suffix =
+     const suffix =
       commonSuffix(
         uniqueCodes,
         prefix.length
       );
-
-
-    /*
+     /*
      * Signature.
      *
      * If unchanged, DOM is untouched.
      */
-
-    const signature =
+     const signature =
       JSON.stringify([
         uniqueCodes,
         prefix,
         suffix
       ]);
-
-
-    rows.forEach(row => {
-
-      const cell =
+     rows.forEach(row => {
+       const cell =
         row.children[2];
-
-
-      if (!cell) {
+       if (!cell) {
         return;
       }
-
-
-      const code =
+       const code =
         cell.dataset.originalCode ||
         cell.textContent.trim();
-
-
-      /*
+       /*
        * Already highlighted correctly.
        */
-
-      if (
+       if (
         cell.dataset.highlightSignature ===
         signature
       ) {
-
-        return;
-
-      }
-
-
-      /*
+         return;
+       }
+       /*
        * Find different section.
        */
-
-      const differentEnd =
+       const differentEnd =
         suffix
           ? code.length -
             suffix.length
           : code.length;
-
-
-      const different =
+       const different =
         code.slice(
           prefix.length,
           differentEnd
         );
-
-
-      /*
+       /*
        * Rebuild only when changed.
        */
-
-      cell.innerHTML =
+       cell.innerHTML =
         '';
-
-
-      /*
+       /*
        * Prefix.
        */
-
-      if (prefix) {
-
-        const span =
+       if (prefix) {
+         const span =
           document.createElement(
             'span'
           );
-
-
-        span.textContent =
+         span.textContent =
           prefix;
-
-
-        cell.appendChild(
+         cell.appendChild(
           span
         );
-
-      }
-
-
-      /*
+       }
+       /*
        * Different section.
        */
-
-      if (different) {
-
-        const span =
+       if (different) {
+         const span =
           document.createElement(
             'span'
           );
-
-
-        span.className =
+         span.className =
           'tm-code-difference';
-
-
-        span.textContent =
+         span.textContent =
           different;
-
-
-        cell.appendChild(
+         cell.appendChild(
           span
         );
-
-      }
-
-
-      /*
+       }
+       /*
        * Suffix.
        */
-
-      if (suffix) {
-
-        const span =
+       if (suffix) {
+         const span =
           document.createElement(
             'span'
           );
-
-
-        span.textContent =
+         span.textContent =
           suffix;
-
-
-        cell.appendChild(
+         cell.appendChild(
           span
         );
-
-      }
-
-
-      cell.dataset.highlightSignature =
+       }
+       cell.dataset.highlightSignature =
         signature;
-
-
-      cell.dataset.highlighted =
+       cell.dataset.highlighted =
         'true';
-
-    });
-
-  }
-
-
-  /*
+     });
+   }
+   /*
    * ==========================================
    * SMART SEARCH TOKENIZER
    * ==========================================
@@ -743,104 +473,70 @@
    * SAMSUNG A36
    *         ^^^
    */
-
-  function getSearchTokens(
+   function getSearchTokens(
     searchValue
   ) {
-
-    return searchValue
+     return searchValue
       .trim()
       .split(/\s+/)
       .filter(Boolean);
-
-  }
-
-
-  /*
+   }
+   /*
    * ==========================================
    * SMART SEARCH MATCH HIGHLIGHT
    * ==========================================
    */
-
-  function highlightSearchResults() {
-
-    const searchInput =
+   function highlightSearchResults() {
+     const searchInput =
       document.querySelector(
         '#searchProducts'
       );
-
-
-    const dropdown =
+     const dropdown =
       document.querySelector(
         '#searchProductsDropdown'
       );
-
-
-    if (
+     if (
       !searchInput ||
       !dropdown
     ) {
-
-      return;
-
-    }
-
-
-    /*
+       return;
+     }
+     /*
      * Current search.
      */
-
-    const searchValue =
+     const searchValue =
       searchInput.value.trim();
-
-
-    /*
+     /*
      * No search.
      *
      * Restore original names.
      */
-
-    if (!searchValue) {
-
-      dropdown
+     if (!searchValue) {
+       dropdown
         .querySelectorAll(
           '.create-order-v2-dropdown-item'
         )
         .forEach(item => {
-
-          if (
+           if (
             item.dataset.originalName !==
             undefined
           ) {
-
-            const original =
+             const original =
               item.dataset.originalName;
-
-
-            if (
+             if (
               item.textContent !==
               original
             ) {
-
-              item.textContent =
+               item.textContent =
                 original;
-
-            }
-
-
-            item.dataset.searchHighlight =
+             }
+             item.dataset.searchHighlight =
               '';
-
-          }
-
-        });
-
-
-      return;
+           }
+         });
+       return;
     }
-
-
-    /*
+     /*
      * Split search into words.
      *
      * Example:
@@ -851,40 +547,29 @@
      *
      * ["ss", "a36"]
      */
-
-    const tokens =
+     const tokens =
       getSearchTokens(
         searchValue
       );
-
-
-    /*
+     /*
      * Nothing to search.
      */
-
-    if (
+     if (
       !tokens.length
     ) {
-
-      return;
-
-    }
-
-
-    /*
+       return;
+     }
+     /*
      * Escape regex special chars.
      */
-
-    const escapedTokens =
+     const escapedTokens =
       tokens.map(token =>
         token.replace(
           /[.*+?^${}()|[\]\\]/g,
           '\\$&'
         )
       );
-
-
-    /*
+     /*
      * Create one regex for ALL
      * search tokens.
      *
@@ -896,79 +581,53 @@
      *
      * /(ss|a36)/gi
      */
-
-    const regex =
+     const regex =
       new RegExp(
         `(${escapedTokens.join('|')})`,
         'gi'
       );
-
-
-    /*
+     /*
      * Process every search result.
      */
-
-    dropdown
+     dropdown
       .querySelectorAll(
         '.create-order-v2-dropdown-item'
       )
       .forEach(item => {
-
-        /*
+         /*
          * Save original product name.
          */
-
-        if (
+         if (
           item.dataset.originalName ===
           undefined
         ) {
-
-          item.dataset.originalName =
+           item.dataset.originalName =
             item.dataset.productName ||
             item.textContent.trim();
-
-        }
-
-
-        const originalName =
+         }
+         const originalName =
           item.dataset.originalName;
-
-
-        /*
+         /*
          * Signature.
          *
          * Prevents unnecessary DOM rebuilding.
          */
-
-        const signature =
+         const signature =
           `${originalName}|||${searchValue}`;
-
-
-        if (
+         if (
           item.dataset.searchHighlight ===
           signature
         ) {
-
-          return;
-
-        }
-
-
-        /*
+           return;
+         }
+         /*
          * Find actual matches first.
          */
-
-        regex.lastIndex =
+         regex.lastIndex =
           0;
-
-
-        const matches = [];
-
-
-        let match;
-
-
-        while (
+         const matches = [];
+         let match;
+         while (
           (
             match =
               regex.exec(
@@ -976,129 +635,87 @@
               )
           ) !== null
         ) {
-
-          matches.push({
+           matches.push({
             start: match.index,
             end:
               match.index +
               match[0].length
           });
-
-
-          /*
+           /*
            * Safety.
            */
-
-          if (
+           if (
             regex.lastIndex ===
             match.index
           ) {
-
-            regex.lastIndex++;
+             regex.lastIndex++;
           }
-
-        }
-
-
-        /*
+         }
+         /*
          * No token matched this product.
          *
          * Keep original text.
          */
-
-        if (
+         if (
           !matches.length
         ) {
-
-          if (
+           if (
             item.textContent !==
             originalName
           ) {
-
-            item.textContent =
+             item.textContent =
               originalName;
-
-          }
-
-
-          item.dataset.searchHighlight =
+           }
+           item.dataset.searchHighlight =
             signature;
-
-
-          return;
-
-        }
-
-
-        /*
+           return;
+         }
+         /*
          * Merge overlapping matches.
          */
-
-        matches.sort(
+         matches.sort(
           (a, b) =>
             a.start - b.start ||
             a.end - b.end
         );
-
-
-        const merged = [];
-
-
-        matches.forEach(match => {
-
-          const last =
+         const merged = [];
+         matches.forEach(match => {
+           const last =
             merged[
               merged.length - 1
             ];
-
-
-          if (
+           if (
             !last ||
             match.start > last.end
           ) {
-
-            merged.push({
+             merged.push({
               start: match.start,
               end: match.end
             });
-
-          } else {
-
-            last.end =
+           } else {
+             last.end =
               Math.max(
                 last.end,
                 match.end
               );
-
-          }
-
-        });
-
-
-        /*
+           }
+         });
+         /*
          * Build highlighted result.
          */
-
-        const fragment =
+         const fragment =
           document.createDocumentFragment();
-
-
-        let lastIndex =
+         let lastIndex =
           0;
-
-
-        merged.forEach(match => {
-
-          /*
+         merged.forEach(match => {
+           /*
            * Text before match.
            */
-
-          if (
+           if (
             match.start >
             lastIndex
           ) {
-
-            fragment.appendChild(
+             fragment.appendChild(
               document.createTextNode(
                 originalName.slice(
                   lastIndex,
@@ -1106,99 +723,68 @@
                 )
               )
             );
-
-          }
-
-
-          /*
+           }
+           /*
            * Highlight match.
            */
-
-          const highlight =
+           const highlight =
             document.createElement(
               'span'
             );
-
-
-          highlight.className =
+           highlight.className =
             'tm-search-match';
-
-
-          highlight.textContent =
+           highlight.textContent =
             originalName.slice(
               match.start,
               match.end
             );
-
-
-          fragment.appendChild(
+           fragment.appendChild(
             highlight
           );
-
-
-          lastIndex =
+           lastIndex =
             match.end;
-
-        });
-
-
-        /*
+         });
+         /*
          * Text after final match.
          */
-
-        if (
+         if (
           lastIndex <
           originalName.length
         ) {
-
-          fragment.appendChild(
+           fragment.appendChild(
             document.createTextNode(
               originalName.slice(
                 lastIndex
               )
             )
           );
-
-        }
-
-
-        /*
+         }
+         /*
          * Replace only once.
          */
-
-        item.replaceChildren(
+         item.replaceChildren(
           fragment
         );
-
-
-        item.dataset.searchHighlight =
+         item.dataset.searchHighlight =
           signature;
-
-      });
-
-  }
-
-
-  /*
+       });
+   }
+   /*
    * ==========================================
    * PRODUCT NAME CHECK
    * ==========================================
    */
-
-  function isNoDiscountProduct(
+   function isNoDiscountProduct(
     row
   ) {
-
-    const text =
+     const text =
       row.textContent
         .replace(
           /\s+/g,
           ' '
         )
         .trim();
-
-
-    /*
+     /*
      * Matches:
      *
      * 9tech
@@ -1208,53 +794,37 @@
      * NEX9TECH
      * NEX 9 TECH
      */
-
-    return /9\s*tech/i.test(
+     return /9\s*tech/i.test(
       text
     );
-
-  }
-
-
-  /*
+   }
+   /*
    * ==========================================
    * STOCK UPDATE
    * ==========================================
    */
-
-  function updateStock(
+   function updateStock(
     currentQtyCell
   ) {
-
-    if (
+     if (
       !currentQtyCell
     ) {
-
-      return;
-
-    }
-
-
-    let currentQty;
-
-
-    /*
+       return;
+     }
+     let currentQty;
+     /*
      * Save original quantity ONCE.
      */
-
-    if (
+     if (
       currentQtyCell.dataset.originalQty
       !== undefined
     ) {
-
-      currentQty =
+       currentQty =
         Number(
           currentQtyCell.dataset.originalQty
         );
-
-    } else {
-
-      currentQty =
+     } else {
+       currentQty =
         Number(
           currentQtyCell.textContent
             .replace(
@@ -1262,187 +832,128 @@
               ''
             )
         );
-
-
-      currentQtyCell.dataset.originalQty =
+       currentQtyCell.dataset.originalQty =
         currentQty;
-
-    }
-
-
-    /*
+     }
+     /*
      * NO STOCK.
      */
-
-    if (
+     if (
       currentQty === 0
     ) {
-
-      if (
+       if (
         !currentQtyCell.querySelector(
           '.tm-no-stock'
         )
       ) {
-
-        currentQtyCell.innerHTML =
+         currentQtyCell.innerHTML =
           '<span class="tm-no-stock">⚠ NO STOCK</span>';
-
-      }
-
-
-      return;
+       }
+       return;
     }
-
-
-    /*
+     /*
      * Normal stock.
      */
-
-    const noStockElement =
+     const noStockElement =
       currentQtyCell.querySelector(
         '.tm-no-stock'
       );
-
-
-    /*
+     /*
      * Only change if currently
      * showing NO STOCK.
      */
-
-    if (
+     if (
       noStockElement
     ) {
-
-      currentQtyCell.textContent =
+       currentQtyCell.textContent =
         String(currentQty);
-
-    }
-
-  }
-
-
-  /*
+     }
+   }
+   /*
    * ==========================================
    * SOUTH CITY HIGHLIGHT
    * ==========================================
    */
-
-  function updateBranchHighlight(
+   function updateBranchHighlight(
     row,
     branch
   ) {
-
-    const isSouthCity =
+     const isSouthCity =
       branch ===
       'South City';
-
-
-    [...row.children].forEach(
+     [...row.children].forEach(
       cell => {
-
-        const expected =
+         const expected =
           isSouthCity
             ? 'rgb(255, 243, 205)'
             : '';
-
-
-        /*
+         /*
          * Don't repeatedly write
          * the same style.
          */
-
-        if (
+         if (
           cell.style.backgroundColor !==
           expected
         ) {
-
-          cell.style.backgroundColor =
+           cell.style.backgroundColor =
             isSouthCity
               ? '#fff3cd'
               : '';
-
-        }
-
-      }
+         }
+       }
     );
-
-  }
-
-
-  /*
+   }
+   /*
    * ==========================================
    * DISCOUNT UPDATE
    * ==========================================
    */
-
-  function updateDiscount(
+   function updateDiscount(
     row,
     priceCell,
     qtyInput,
     noDiscount
   ) {
-
-    let discountCell =
+     let discountCell =
       row.querySelector(
         '.tm-discount-price'
       );
-
-
-    /*
+     /*
      * 9 TECH
      *
      * NO DISCOUNT.
      */
-
-    if (
+     if (
       noDiscount
     ) {
-
-      if (
+       if (
         discountCell
       ) {
-
-        discountCell.remove();
-
-      }
-
-
-      return;
-
-    }
-
-
-    /*
+         discountCell.remove();
+       }
+       return;
+     }
+     /*
      * Normal product.
      */
-
-    if (
+     if (
       !discountCell
     ) {
-
-      discountCell =
+       discountCell =
         document.createElement(
           'td'
         );
-
-
-      discountCell.className =
+       discountCell.className =
         'tm-discount-price';
-
-
-      priceCell.insertAdjacentElement(
+       priceCell.insertAdjacentElement(
         'afterend',
         discountCell
       );
-
-    }
-
-
-    /*
+     }
+     /*
      * Get price.
      */
-
-    const price =
+     const price =
       Number(
         qtyInput?.dataset.price ||
         priceCell.textContent
@@ -1451,13 +962,10 @@
             ''
           )
       );
-
-
-    /*
+     /*
      * Calculate 10% off.
      */
-
-    const discount =
+     const discount =
       Number.isFinite(
         price
       )
@@ -1465,155 +973,99 @@
             price * 0.9
           ).toFixed(2)
         : '-';
-
-
-    /*
+     /*
      * No change.
      *
      * Do not rebuild DOM.
      */
-
-    if (
+     if (
       discountCell.dataset.value ===
       discount
     ) {
-
-      return;
-
-    }
-
-
-    discountCell.dataset.value =
+       return;
+     }
+     discountCell.dataset.value =
       discount;
-
-
-    /*
+     /*
      * Build discount cell.
      */
-
-    discountCell.innerHTML =
+     discountCell.innerHTML =
       '';
-
-
-    /*
+     /*
      * Price text.
      */
-
-    const priceSpan =
+     const priceSpan =
       document.createElement(
         'span'
       );
-
-
-    priceSpan.className =
+     priceSpan.className =
       'tm-discount-value';
-
-
-    priceSpan.textContent =
+     priceSpan.textContent =
       discount;
-
-
-    discountCell.appendChild(
+     discountCell.appendChild(
       priceSpan
     );
-
-
-    /*
+     /*
      * Copy button.
      */
-
-    const button =
+     const button =
       document.createElement(
         'button'
       );
-
-
-    button.className =
+     button.className =
       'tm-copy-btn';
-
-
-    button.type =
+     button.type =
       'button';
-
-
-    button.title =
+     button.title =
       `Copy ${discount}`;
-
-
-    button.innerHTML =
+     button.innerHTML =
       '<i class="fas fa-copy"></i>';
-
-
-    /*
+     /*
      * Copy PURE TEXT only.
      */
-
-    button.addEventListener(
+     button.addEventListener(
       'click',
       event => {
-
-        event.preventDefault();
-
-        event.stopPropagation();
-
-
-        copyPureText(
+         event.preventDefault();
+         event.stopPropagation();
+         copyPureText(
           discount,
           button
         );
-
-      }
+       }
     );
-
-
-    discountCell.appendChild(
+     discountCell.appendChild(
       button
     );
-
-  }
-
-
-  /*
+   }
+   /*
    * ==========================================
    * DISCOUNT HEADER
    * ==========================================
    */
-
-  function addDiscountHeader(
+   function addDiscountHeader(
     table
   ) {
-
-    const headerRow =
+     const headerRow =
       table.querySelector(
         'thead tr'
       );
-
-
-    if (
+     if (
       !headerRow
     ) {
-
-      return;
-
-    }
-
-
-    /*
+       return;
+     }
+     /*
      * Already exists.
      */
-
-    if (
+     if (
       headerRow.querySelector(
         '.tm-discount-header'
       )
     ) {
-
-      return;
-
-    }
-
-
-    const priceHeader =
+       return;
+     }
+     const priceHeader =
       [
         ...headerRow.children
       ].find(
@@ -1621,217 +1073,144 @@
           th.textContent.trim() ===
           'Price'
       );
-
-
-    if (
+     if (
       !priceHeader
     ) {
-
-      return;
-
-    }
-
-
-    const header =
+       return;
+     }
+     const header =
       document.createElement(
         'th'
       );
-
-
-    header.className =
+     header.className =
       'tm-discount-header';
-
-
-    header.textContent =
+     header.textContent =
       '10% Off';
-
-
-    header.style.cssText =
+     header.style.cssText =
       'width:105px;' +
       'min-width:105px;' +
       'padding:6px 4px;' +
       'font-size:15px;' +
       'text-align:center;' +
       'white-space:nowrap';
-
-
-    priceHeader.insertAdjacentElement(
+     priceHeader.insertAdjacentElement(
       'afterend',
       header
     );
-
-  }
-
-
-  /*
+   }
+   /*
    * ==========================================
    * MAIN TABLE UPDATE
    * ==========================================
    */
-
-  function updateTable() {
-
-    const table =
+   function updateTable() {
+     const table =
       document.querySelector(
         '.create-order-v2-variants-table'
       );
-
-
-    if (
+     if (
       !table
     ) {
-
-      return;
-
-    }
-
-
-    /*
+       return;
+     }
+     /*
      * Header.
      */
-
-    addDiscountHeader(
+     addDiscountHeader(
       table
     );
-
-
-    /*
+     /*
      * Rows.
      */
-
-    const rows =
+     const rows =
       [
         ...document.querySelectorAll(
           '#variantsTableBody tr'
         )
       ];
-
-
-    /*
+     /*
      * Code highlight.
      */
-
-    highlightCodeDifferences(
+     highlightCodeDifferences(
       rows
     );
-
-
-    /*
+     /*
      * Process rows.
      */
-
-    rows.forEach(row => {
-
-      const cells =
+     rows.forEach(row => {
+       const cells =
         row.children;
-
-
-      /*
+       /*
        * Branch.
        */
-
-      const branch =
+       const branch =
         cells[0]?.textContent.trim();
-
-
-      /*
+       /*
        * Stock.
        */
-
-      const currentQtyCell =
+       const currentQtyCell =
         cells[5];
-
-
-      /*
+       /*
        * Price.
        */
-
-      const priceCell =
+       const priceCell =
         row.querySelector(
           '.variant-price'
         );
-
-
-      /*
+       /*
        * Quantity input.
        */
-
-      const qtyInput =
+       const qtyInput =
         row.querySelector(
           '.variant-qty'
         );
-
-
-      if (
+       if (
         !priceCell ||
         !currentQtyCell
       ) {
-
-        return;
-
-      }
-
-
-      /*
+         return;
+       }
+       /*
        * South City.
        *
        * Works even for 9 Tech.
        */
-
-      updateBranchHighlight(
+       updateBranchHighlight(
         row,
         branch
       );
-
-
-      /*
+       /*
        * Stock.
        */
-
-      updateStock(
+       updateStock(
         currentQtyCell
       );
-
-
-      /*
+       /*
        * 9 Tech.
        */
-
-      const noDiscount =
+       const noDiscount =
         isNoDiscountProduct(
           row
         );
-
-
-      /*
+       /*
        * Discount.
        */
-
-      updateDiscount(
+       updateDiscount(
         row,
         priceCell,
         qtyInput,
         noDiscount
       );
-
-    });
-
-  }
-
-
-  /*
+     });
+   }
+   /*
    * ==========================================
    * START
    * ==========================================
    */
-
-  addStyles();
-
-
-  updateTable();
-
-
-  /*
+   addStyles();
+   updateTable();
+   /*
    * ==========================================
    * CONTINUOUS TABLE CHECK
    * ==========================================
@@ -1841,40 +1220,30 @@
    * DOM is only changed when something
    * actually changed.
    */
-
-  setInterval(
+   setInterval(
     updateTable,
     UPDATE_INTERVAL
   );
-
-
-  /*
+   /*
    * ==========================================
    * SEARCH INPUT EVENT
    * ==========================================
    *
    * Highlight immediately while typing.
    */
-
-  document.addEventListener(
+   document.addEventListener(
     'input',
     event => {
-
-      if (
+       if (
         event.target &&
         event.target.id ===
         'searchProducts'
       ) {
-
-        highlightSearchResults();
-
-      }
-
-    }
+         highlightSearchResults();
+       }
+     }
   );
-
-
-  /*
+   /*
    * ==========================================
    * SEARCH DROPDOWN OBSERVER
    * ==========================================
@@ -1882,30 +1251,22 @@
    * Website dynamically creates search
    * results.
    */
-
-  const searchDropdown =
+   const searchDropdown =
     document.querySelector(
       '#searchProductsDropdown'
     );
-
-
-  if (
+   if (
     searchDropdown
   ) {
-
-    const observer =
+     const observer =
       new MutationObserver(
         mutations => {
-
-          let changed =
+           let changed =
             false;
-
-
-          for (
+           for (
             const mutation of mutations
           ) {
-
-            if (
+             if (
               mutation.type ===
               'childList' &&
               (
@@ -1913,46 +1274,31 @@
                 mutation.removedNodes.length
               )
             ) {
-
-              changed =
+               changed =
                 true;
-
-              break;
-
-            }
-
-          }
-
-
-          if (
+               break;
+             }
+           }
+           if (
             changed
           ) {
-
-            highlightSearchResults();
-
-          }
-
-        }
+             highlightSearchResults();
+           }
+         }
       );
-
-
-    observer.observe(
+     observer.observe(
       searchDropdown,
       {
         childList: true,
         subtree: true
       }
     );
-
-  }
-
-
-  /*
+   }
+   /*
    * ==========================================
    * INITIAL SEARCH HIGHLIGHT
    * ==========================================
    */
-
-  highlightSearchResults();
-
-})();
+   highlightSearchResults();
+ })();
+ 
