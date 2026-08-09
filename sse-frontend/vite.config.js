@@ -10,6 +10,10 @@ import {
 } from "vite-plugin-pwa";
 
 export default defineConfig({
+  server:{
+    host:true,
+    allowedHosts:["unfaintly-thiolacetic-melisa.ngrok-free.dev"]
+  },
   plugins: [
     react(),
 

@@ -17,6 +17,10 @@ const AUTO_SCROLL_EDGE_PX = 90;
 const AUTO_SCROLL_MAX_SPEED = 50;
 const SCANNER_BUFFER_RESET_MS = 300;
 const SCAN_HIGHLIGHT_MS = 2500;
+const MOBILE_SCAN_INTERVAL_MS=250;
+const MOBILE_MOTION_INTERVAL_MS=500;
+const MOBILE_SCAN_INACTIVITY_MS=10000;
+const MOBILE_SCAN_CLEAR_FRAMES=3;
 const TRASH_PROXIMITY_DISTANCE_PX = 240;
 const ORDER_TYPE_STORAGE_KEY = "order-type-overrides";
 const SEEN_ORDERS_STORAGE_KEY = "seen-order-ids";
@@ -24,7 +28,7 @@ const SERVER_SNAPSHOT_STORAGE_KEY = "packaging-server-snapshot";
 const ORDER_CHANGES_STORAGE_KEY = "packaging-order-changes";
 const NINE_TECH_PATTERN=/9[\s_-]*tech\b/i;
 
-const getPageFromPath=()=>location.pathname==="/credit-note-report"?"credit-note-report":location.pathname==="/open-invoice"?"open-invoice":"packaging";
+const getPageFromPath=()=>location.pathname==="/credit-note-report"?"credit-note-report":location.pathname==="/open-invoice"?"open-invoice":location.pathname==="/mobile-scanner"?"mobile-scanner":"packaging";
 const normalizeProductCode=value=>String(value||"").replace(/[\r\n\t]/g,"").trim().toUpperCase();
 const toQuantity=value=>Math.max(0,Number(value)||0);
 const clampPackedQuantity=(value,quantity)=>Math.min(toQuantity(quantity),toQuantity(value));
@@ -231,6 +235,151 @@ const mergeOrderChanges = (currentChanges, detectedChanges) => {
   });
   return nextChanges;
 };
+
+function MobileScannerPage({loading,onExit,onScan,scanResult}){
+  const videoRef=useRef(null);
+  const onScanRef=useRef(onScan);
+  const loadingRef=useRef(loading);
+  const wakeScannerRef=useRef(()=>{});
+  const [cameraStatus,setCameraStatus]=useState({type:"starting",message:"Starting rear camera..."});
+  const [lastCode,setLastCode]=useState("");
+  const [torchOn,setTorchOn]=useState(false);
+  const [torchSupported,setTorchSupported]=useState(false);
+  useEffect(()=>{onScanRef.current=onScan;},[onScan]);
+  useEffect(()=>{loadingRef.current=loading;},[loading]);
+  useEffect(()=>{
+    let active=true,detecting=false,busy=false,waitingForClear=false,clearFrames=0,previousFrame=null,ignoreMotionUntil=0;
+    let stream,track,detector,scanTimer,motionTimer,inactivityTimer,torchTask=Promise.resolve();
+    let lastActivity=Date.now(),idle=false;
+    const motionCanvas=document.createElement("canvas");
+    motionCanvas.width=48;
+    motionCanvas.height=36;
+    const motionContext=motionCanvas.getContext("2d",{willReadFrequently:true});
+    const applyTorch=enabled=>{
+      if(!track?.getCapabilities?.().torch)return Promise.resolve();
+      torchTask=torchTask.then(()=>track.applyConstraints({advanced:[{torch:enabled}]})).then(()=>{if(active)setTorchOn(enabled);}).catch(error=>console.warn("Torch control unavailable",error));
+      return torchTask;
+    };
+    const markReady=async()=>{
+      if(!active)return;
+      idle=false;
+      lastActivity=Date.now();
+      setCameraStatus({type:"ready",message:"Ready to scan"});
+      await applyTorch(true);
+    };
+    const wakeScanner=()=>{
+      if(!active||!track||busy||waitingForClear)return;
+      previousFrame=null;
+      ignoreMotionUntil=Date.now()+1500;
+      markReady();
+    };
+    wakeScannerRef.current=wakeScanner;
+    const detectFrame=async()=>{
+      const video=videoRef.current;
+      if(!active||detecting||busy||idle||loadingRef.current||!detector||video?.readyState<2)return;
+      detecting=true;
+      try{
+        const codes=await detector.detect(video);
+        if(waitingForClear){
+          clearFrames=codes.length===0?clearFrames+1:0;
+          if(clearFrames>=MOBILE_SCAN_CLEAR_FRAMES){waitingForClear=false;clearFrames=0;await markReady();}
+          return;
+        }
+        const code=normalizeProductCode(codes[0]?.rawValue);
+        if(!code)return;
+        busy=true;
+        waitingForClear=true;
+        lastActivity=Date.now();
+        setLastCode(code);
+        setCameraStatus({type:"processing",message:`Packing ${code}...`});
+        await applyTorch(false);
+        const saved=await onScanRef.current(code);
+        if(active)setCameraStatus(saved?{type:"success",message:`${code} scanned. Remove QR to scan next.`}:{type:"error",message:`${code} was not packed. Remove QR to continue.`});
+      }catch(error){
+        if(active&&error?.name!=="NotFoundError")console.warn("QR detection failed",error);
+      }finally{busy=false;detecting=false;}
+    };
+    const detectMotion=()=>{
+      const video=videoRef.current;
+      if(!active||!motionContext||video?.readyState<2)return;
+      motionContext.drawImage(video,0,0,motionCanvas.width,motionCanvas.height);
+      const pixels=motionContext.getImageData(0,0,motionCanvas.width,motionCanvas.height).data;
+      if(previousFrame&&Date.now()>=ignoreMotionUntil){
+        let difference=0,samples=0;
+        for(let index=0;index<pixels.length;index+=16){difference+=Math.abs(pixels[index]-previousFrame[index]);samples+=1;}
+        if(difference/Math.max(samples,1)>7){lastActivity=Date.now();if(idle)wakeScanner();}
+      }
+      previousFrame=new Uint8ClampedArray(pixels);
+    };
+    const checkInactivity=async()=>{
+      if(!active||idle||busy||waitingForClear||Date.now()-lastActivity<MOBILE_SCAN_INACTIVITY_MS)return;
+      idle=true;
+      previousFrame=null;
+      ignoreMotionUntil=Date.now()+1500;
+      setCameraStatus({type:"idle",message:"No activity for 10 seconds. Move the phone or tap to resume."});
+      await applyTorch(false);
+    };
+    const handleVisibility=()=>document.hidden?applyTorch(false):wakeScanner();
+    const startCamera=async()=>{
+      try{
+        if(!navigator.mediaDevices?.getUserMedia)throw new Error("Camera access requires HTTPS and a supported browser.");
+        if(!("BarcodeDetector" in window))throw new Error("QR scanning is not supported in this browser. Use Chrome on Android.");
+        const formats=await window.BarcodeDetector.getSupportedFormats();
+        if(!formats.includes("qr_code"))throw new Error("This browser cannot detect QR codes.");
+        detector=new window.BarcodeDetector({formats:["qr_code"]});
+        stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}});
+        if(!active){stream.getTracks().forEach(item=>item.stop());return;}
+        track=stream.getVideoTracks()[0];
+        const supportsTorch=Boolean(track?.getCapabilities?.().torch);
+        setTorchSupported(supportsTorch);
+        videoRef.current.srcObject=stream;
+        await videoRef.current.play();
+        await markReady();
+        scanTimer=setInterval(detectFrame,MOBILE_SCAN_INTERVAL_MS);
+        motionTimer=setInterval(detectMotion,MOBILE_MOTION_INTERVAL_MS);
+        inactivityTimer=setInterval(checkInactivity,1000);
+        document.addEventListener("visibilitychange",handleVisibility);
+      }catch(error){
+        if(!active)return;
+        const denied=error?.name==="NotAllowedError"||error?.name==="PermissionDeniedError";
+        setCameraStatus({type:"error",message:denied?"Camera permission was denied. Allow camera access and try again.":error.message||"Unable to start camera."});
+      }
+    };
+    startCamera();
+    return()=>{
+      active=false;
+      clearInterval(scanTimer);
+      clearInterval(motionTimer);
+      clearInterval(inactivityTimer);
+      document.removeEventListener("visibilitychange",handleVisibility);
+      if(track?.getCapabilities?.().torch)track.applyConstraints({advanced:[{torch:false}]}).catch(()=>{});
+      stream?.getTracks().forEach(item=>item.stop());
+      if(videoRef.current)videoRef.current.srcObject=null;
+    };
+  },[]);
+  const statusColor=cameraStatus.type==="success"?"#22c55e":cameraStatus.type==="error"?"#ef4444":cameraStatus.type==="processing"?"#60a5fa":cameraStatus.type==="idle"?"#f59e0b":"#ffffff";
+  return <div onPointerDown={()=>wakeScannerRef.current()} style={{minHeight:"100dvh",background:"#020617",color:"#fff",display:"flex",flexDirection:"column",fontFamily:"inherit"}}>
+    <style>{`@keyframes mobile-scan-line{0%,100%{transform:translateY(-110px)}50%{transform:translateY(110px)}}`}</style>
+    <header style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"12px",padding:"14px 16px",background:"#0f172a",position:"relative",zIndex:2}}>
+      <div><strong style={{fontSize:"18px"}}>Continuous QR Scanner</strong><div style={{fontSize:"12px",color:"#94a3b8"}}>{loading?"Loading orders...":"Scan once to pack one unit"}</div></div>
+      <button type="button" onClick={event=>{event.stopPropagation();onExit();}} style={{padding:"10px 16px",border:0,borderRadius:"10px",background:"#ef4444",color:"#fff",fontWeight:800}}>Exit</button>
+    </header>
+    <main style={{flex:1,display:"flex",flexDirection:"column",padding:"16px",gap:"14px"}}>
+      <div style={{position:"relative",flex:"1 1 55vh",minHeight:"340px",maxHeight:"68vh",overflow:"hidden",borderRadius:"18px",background:"#111827",border:`3px solid ${statusColor}`}}>
+        <video ref={videoRef} muted playsInline autoPlay style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+        <div style={{position:"absolute",left:"12%",right:"12%",top:"22%",bottom:"22%",border:"3px solid rgba(255,255,255,.9)",borderRadius:"16px",boxShadow:"0 0 0 999px rgba(2,6,23,.28)"}}/>
+        {cameraStatus.type==="ready"&&<div style={{position:"absolute",left:"16%",right:"16%",top:"50%",height:"3px",background:"#22c55e",boxShadow:"0 0 12px #22c55e",animation:"mobile-scan-line 2s ease-in-out infinite"}}/>}
+        <div style={{position:"absolute",left:"12px",top:"12px",padding:"7px 10px",borderRadius:"999px",background:"rgba(2,6,23,.75)",fontSize:"12px",fontWeight:800}}>{torchSupported?(torchOn?"🔦 Torch on":"🔦 Torch off"):"Torch unavailable"}</div>
+      </div>
+      <section style={{padding:"14px",borderRadius:"14px",background:"#0f172a",border:`1px solid ${statusColor}`}}>
+        <div style={{color:statusColor,fontWeight:800}}>{cameraStatus.message}</div>
+        <div style={{marginTop:"6px",fontSize:"13px",color:scanResult.type==="error"?"#fca5a5":"#cbd5e1"}}>{scanResult.message}</div>
+        {lastCode&&<div style={{marginTop:"6px",fontSize:"12px",color:"#94a3b8"}}>Last QR: {lastCode}</div>}
+      </section>
+    </main>
+  </div>;
+}
+
 function App() {
   const [currentPage,setCurrentPage]=useState(getPageFromPath);
   const [navigationState,setNavigationState]=useState(()=>window.history.state||{});
@@ -446,7 +595,7 @@ const playNotificationSound=useCallback(()=>{
   }, [playNotificationSound]);
   // Automatically request updates every three seconds.
   useEffect(() => {
-    if (currentPage !== "packaging") {
+    if (!["packaging","mobile-scanner"].includes(currentPage)) {
       return undefined;
     }
 
@@ -576,12 +725,12 @@ const playNotificationSound=useCallback(()=>{
     }));
     if(matches.length===0){
       setScanResult({type:"error",message:`${code} not found in any order`});
-      return;
+      return false;
     }
     const match=matches.find(result=>!isItemFullyPackaged(result.item)&&!updatingItemKeysRef.current.has(result.item.storageKey))||matches.find(result=>!updatingItemKeysRef.current.has(result.item.storageKey))||matches[0];
     if(updatingItemKeysRef.current.has(match.item.storageKey)){
       setScanResult({type:"saving",message:`${code} is waiting for the previous scan`});
-      return;
+      return false;
     }
     revealScannedItem(match.order.id,match.item.storageKey);
     const unpacking=isItemFullyPackaged(match.item);
@@ -590,19 +739,21 @@ const playNotificationSound=useCallback(()=>{
     setScanResult({type:"saving",message:`${unpacking?"Unpacking":"Packing"} ${code} · ${nextLabel} · ${match.order.name}`});
     const saved=await setItemPackedQuantity(match.order.id,match.itemIndex,nextPackedQuantity,false);
     setScanResult(saved?{type:"success",message:`${code} · ${unpacking?"Unpacked · ":""}${nextLabel} · ${match.order.name}`}:{type:"error",message:`Failed to save ${code}`});
+    return saved;
   };
   const processScannedCode=useCallback(rawCode=>{
     const code=normalizeProductCode(rawCode);
     setScanCode("");
     if(!code){
       setScanResult({type:"error",message:"No product code received"});
-      return;
+      return Promise.resolve(false);
     }
     const previousTask=scanQueueRef.current.get(code)||Promise.resolve();
     const nextTask=previousTask.catch(()=>{}).then(()=>processScannedCodeNow(code)).finally(()=>{
       if(scanQueueRef.current.get(code)===nextTask)scanQueueRef.current.delete(code);
     });
     scanQueueRef.current.set(code,nextTask);
+    return nextTask;
   },[orders]);
 
 
@@ -1186,6 +1337,10 @@ const playNotificationSound=useCallback(()=>{
     return <OpenInvoice apiBaseUrl={pageApiBaseUrl} onBack={()=>navigate("/",{apiBaseUrl:API_BASE_URL})}/>;
   }
 
+  if(currentPage==="mobile-scanner"){
+    return <MobileScannerPage loading={loading} scanResult={scanResult} onScan={processScannedCode} onExit={()=>navigate("/",{apiBaseUrl:API_BASE_URL})}/>;
+  }
+
   const trashGlowAlpha=(trashProximity*0.78).toFixed(3);
   const trashGlowSoft=(trashProximity*0.34).toFixed(3);
   const trashGlowSize=`${12+Math.round(trashProximity*44)}px`;
@@ -1217,6 +1372,7 @@ const playNotificationSound=useCallback(()=>{
           </p>
         </div>
         <div className="header-actions">
+          <button type="button" onClick={()=>navigate("/mobile-scanner",{apiBaseUrl:API_BASE_URL})} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#7c3aed",color:"#fff",cursor:"pointer",fontWeight:"700"}}>Mobile Scan</button>
           <div style={{display:"flex",flexDirection:"column",gap:"5px",minWidth:"280px"}}>
             <div style={{display:"flex",gap:"6px"}}>
               <input
