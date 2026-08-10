@@ -485,7 +485,7 @@ def credit_note_report():
             remark=str(row[5] or "").strip()
             normalized_remark=normalize_credit_remark(remark)
             category="no_problem_cn" if normalized_remark=="NOPROBLEMCN" else "problem_cn" if normalized_remark=="PROBLEMCN" else "others"
-            credit_note_id=extract_credit_note_id(row[9])
+            credit_note_id=extract_credit_note_id(row[8])
             if not credit_note_id or credit_note_id in used_credit_note_ids:continue
             used_credit_note_ids.add(credit_note_id)
             dealer_name=str(row[3] or "-").strip() or "-"
