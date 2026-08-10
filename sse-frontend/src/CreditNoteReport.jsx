@@ -1,6 +1,6 @@
 import{useMemo,useState}from"react";
 import axios from"axios";
-import{utils,writeFileXLSX}from"xlsx";
+import{utils,writeFile}from"xlsx-js-style";
 import"./CreditNoteReport.css";
 
 const DEFAULT_API_BASE_URL="https://sse-sales-check.onrender.com";
@@ -8,7 +8,10 @@ const DEFAULT_API_BASE_URL="https://sse-sales-check.onrender.com";
 const CATEGORIES=[{key:"no_problem_cn",title:"No Problem CN"},{key:"problem_cn",title:"Problem CN"},{key:"others",title:"Others"}];
 const EXPORT_FIELDS=[{key:"dealer_name",label:"Dealer Name",width:25},{key:"date",label:"Date",width:20},{key:"product_code",label:"Code",width:18},{key:"product_name",label:"Name",width:48},{key:"product_description",label:"Description",width:48},{key:"remark",label:"Remark",width:38},{key:"refund_qty",label:"Refund Qty",width:12}];
 
-const getYesterdayDate=()=>{const date=new Date();date.setDate(date.getDate()-1);return`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;};
+const formatLocalDate=date=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+const getTodayDate=()=>formatLocalDate(new Date());
+const toExcelDate=value=>{const match=String(value??"").match(/^(\d{4})-(\d{2})-(\d{2})/);return match?new Date(Number(match[1]),Number(match[2])-1,Number(match[3])):value;};
+const getDefaultStartDate=()=>{const date=new Date(),day=date.getDay();date.setDate(date.getDate()-(day===0?2:day===1?3:day===2?4:day===3?1:day===4?2:day===5?3:1));return formatLocalDate(date);};
 const normalizeCreditText=value=>String(value??"").replace(/<[^>]*>/g," ").replace(/&nbsp;|&#160;/gi," ").replace(/\u00a0/g," ").replace(/[\u200B-\u200D\uFEFF]/g,"").normalize("NFKC").toUpperCase().replace(/[^A-Z0-9]/g,"");
 const resolveCreditCategory=row=>{const normalized=normalizeCreditText(row?.remark??row?.credit_remark??"");if(normalized==="NOPROBLEMCN")return"no_problem_cn";if(normalized==="PROBLEMCN")return"problem_cn";return"others";};
 const getCellValue=(row,key)=>key==="refund_qty"?Number(row?.[key])||0:key==="remark"?(row?.remark??row?.credit_remark??""):row?.[key]??"";
@@ -20,8 +23,8 @@ const getSortLabels=key=>key==="date"||key==="refund_qty"?{asc:"Ascending",desc:
 
 function CreditNoteReport({apiBaseUrl=DEFAULT_API_BASE_URL,onBack}){
   const CREDIT_NOTE_REPORT_API_URL=`${apiBaseUrl}/credit-note-report`;
-  const[dateStart,setDateStart]=useState("");
-  const[dateEnd,setDateEnd]=useState(getYesterdayDate);
+  const[dateStart,setDateStart]=useState(getDefaultStartDate);
+  const[dateEnd,setDateEnd]=useState(getTodayDate);
   const[reportRows,setReportRows]=useState([]);
   const[recordsFiltered,setRecordsFiltered]=useState(0);
   const[matchedCreditNotes,setMatchedCreditNotes]=useState(0);
@@ -29,13 +32,14 @@ function CreditNoteReport({apiBaseUrl=DEFAULT_API_BASE_URL,onBack}){
   const[progress,setProgress]=useState("");
   const[error,setError]=useState("");
   const[previewOpen,setPreviewOpen]=useState(false);
-  const[selectedFieldKeys,setSelectedFieldKeys]=useState(()=>EXPORT_FIELDS.map(field=>field.key));
-  const[selectedCategoryKeys,setSelectedCategoryKeys]=useState(()=>CATEGORIES.map(category=>category.key));
+  const[selectedFieldKeys,setSelectedFieldKeys]=useState(["date","product_code","product_description","refund_qty"]);
+  const[selectedCategoryKeys,setSelectedCategoryKeys]=useState(["no_problem_cn"]);
   const[includeTitleHeader,setIncludeTitleHeader]=useState(true);
   const[includeFieldHeader,setIncludeFieldHeader]=useState(true);
-  const[sortField,setSortField]=useState("");
+  const[sortField,setSortField]=useState("date");
   const[sortDirection,setSortDirection]=useState("asc");
   const[copyMessage,setCopyMessage]=useState("");
+  const[officerName,setOfficerName]=useState(()=>{try{return localStorage.getItem("creditNoteOfficerName")||"Anonymous";}catch{return"Anonymous";}});
 
   const categorizedRows=useMemo(()=>CATEGORIES.map(category=>({...category,rows:reportRows.filter(row=>resolveCreditCategory(row)===category.key)})),[reportRows]);
   const sortedCategories=useMemo(()=>categorizedRows.map(category=>({...category,rows:sortRows(category.rows,sortField,sortDirection)})),[categorizedRows,sortField,sortDirection]);
@@ -108,33 +112,24 @@ function CreditNoteReport({apiBaseUrl=DEFAULT_API_BASE_URL,onBack}){
 
   const exportToExcel=()=>{
     if(!canExport)return;
+    const exportOfficerName=officerName.trim()||"Anonymous";
+    try{localStorage.setItem("creditNoteOfficerName",exportOfficerName);}catch{}
 
     const workbook=utils.book_new();
 
     selectedExportCategories.forEach(category=>{
-      const excelRows=[];
-
-      if(includeTitleHeader){
-        excelRows.push([category.title,...Array(Math.max(selectedFields.length-1,0)).fill("")]);
-      }
-
-      if(includeFieldHeader){
-        excelRows.push(selectedFields.map(field=>field.label));
-      }
-
-      excelRows.push(...category.rows.map(row=>selectedFields.map(field=>getCellValue(row,field.key))));
-
+      const excelRows=[["SSE IN/OUT STOCK","","","",""] ,["BRANCH:","","SOUTH CITY","",""] ,["No","Date","Product Code","Product Name","Qty"],...category.rows.map((row,index)=>[index+1,toExcelDate(getCellValue(row,"date")),getCellValue(row,"product_code"),getCellValue(row,"product_description"),getCellValue(row,"refund_qty")]),["","","","do officer",""],["","","",exportOfficerName,""]];
       const worksheet=utils.aoa_to_sheet(excelRows);
-      worksheet["!cols"]=selectedFields.map(field=>({wch:field.width}));
-
-      if(includeTitleHeader&&selectedFields.length>1){
-        worksheet["!merges"]=[{s:{r:0,c:0},e:{r:0,c:selectedFields.length-1}}];
-      }
+      worksheet["!cols"]=[{wch:8},{wch:14},{wch:22},{wch:65},{wch:10}];
+      worksheet["!merges"]=[{s:{r:0,c:0},e:{r:0,c:4}},{s:{r:1,c:0},e:{r:1,c:1}}];
+      const border={top:{style:"thin",color:{rgb:"000000"}},bottom:{style:"thin",color:{rgb:"000000"}},left:{style:"thin",color:{rgb:"000000"}},right:{style:"thin",color:{rgb:"000000"}}};
+      const officerRow=excelRows.length-2;
+      for(let r=0;r<excelRows.length;r++)for(let c=0;c<5;c++){const address=utils.encode_cell({r,c});if(!worksheet[address])worksheet[address]={t:"s",v:""};worksheet[address].s={border,alignment:{horizontal:c===2||c===3?"left":"center",vertical:"center"},font:{name:"Arial",sz:11,bold:r===0||r===1,color:{rgb:r===officerRow&&c===3?"FF0000":"000000"}},...(c===1&&r>=3&&r<officerRow?{numFmt:"d/m/yyyy"}:{})};}
 
       utils.book_append_sheet(workbook,worksheet,category.title);
     });
 
-    writeFileXLSX(workbook,`Credit_Note_Report_${dateStart}_to_${dateEnd}.xlsx`);
+    writeFile(workbook,`SSE_IN_OUT_STOCK_${dateStart}_to_${dateEnd}.xlsx`,{cellStyles:true});
   };
 
   const renderTable=(category,fields,isPreview=false)=>{
@@ -228,6 +223,8 @@ function CreditNoteReport({apiBaseUrl=DEFAULT_API_BASE_URL,onBack}){
           <div className="credit-report-layout-divider"/>
 
           <strong>Excel Layout</strong>
+
+          <label className="credit-report-sort-field"><span>Name</span><input type="text" value={officerName} onChange={event=>{setOfficerName(event.target.value);try{localStorage.setItem("creditNoteOfficerName",event.target.value.trim()||"Anonymous");}catch{}}} placeholder="Anonymous" className="credit-report-input"/></label>
 
           <div className="credit-report-field-options credit-report-layout-options">
             <label className="credit-report-field-option"><input type="checkbox" checked={includeTitleHeader} onChange={event=>setIncludeTitleHeader(event.target.checked)}/><span>Include Title Header</span></label>
