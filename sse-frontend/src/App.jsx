@@ -11,6 +11,7 @@ const PACKAGING_STATUS_API_URL = `${API_BASE_URL}/packaging-status`;
 const APPROVE_ORDER_API_URL = `${API_BASE_URL}/approve-order`;
 const COMBINE_ORDERS_API_URL = `${API_BASE_URL}/combine-orders`;
 const REMOVE_ORDER_API_URL = `${API_BASE_URL}/remove-order`;
+const MOVE_PRODUCT_API_URL = `${API_BASE_URL}/move-product`;
 const POLL_INTERVAL_MS = 3000;
 const CARD_HEIGHT_PX = 450;
 const AUTO_SCROLL_EDGE_PX = 90;
@@ -58,6 +59,17 @@ const getOrderMergeEligibility=(sourceOrder,targetOrder)=>{
   const targetGroup=getOrderProductGroup(targetOrder);
   if(sourceGroup==="mixed"||targetGroup==="mixed")return {allowed:false,reason:"nine_tech_mixed"};
   if(sourceGroup!==targetGroup)return {allowed:false,reason:"nine_tech_mismatch"};
+  return {allowed:true,reason:"allowed"};
+};
+const getProductMoveEligibility=(draggedProduct,targetOrder)=>{
+  const sourceOrder=draggedProduct?.sourceOrder;
+  const item=draggedProduct?.item;
+  if(!sourceOrder||!item||!targetOrder)return {allowed:false,reason:"missing_product"};
+  if(sourceOrder.id===targetOrder.id)return {allowed:false,reason:"same_order"};
+  if(!getDealerKey(sourceOrder)||getDealerKey(sourceOrder)!==getDealerKey(targetOrder))return {allowed:false,reason:"different_dealer"};
+  const targetGroup=getOrderProductGroup(targetOrder);
+  if(targetGroup==="mixed")return {allowed:false,reason:"nine_tech_mixed"};
+  if(targetGroup!=="empty"&&targetGroup!==(isNineTechItem(item)?"nine_tech":"normal"))return {allowed:false,reason:"nine_tech_mismatch"};
   return {allowed:true,reason:"allowed"};
 };
 const getProductPackagingLabel=(item,packedValue=item?.packedQuantity)=>{
@@ -389,8 +401,11 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [draggingOrderId, setDraggingOrderId] = useState(null);
+  const [draggingProduct,setDraggingProduct]=useState(null);
   const [dragOverSection, setDragOverSection] = useState(null);
   const [dragOverOrderId,setDragOverOrderId]=useState(null);
+  const [isMovingProduct,setIsMovingProduct]=useState(false);
+  const [productMoveNotice,setProductMoveNotice]=useState(null);
   const [combineDialog,setCombineDialog]=useState(null);
   const [combineError,setCombineError]=useState("");
   const [isCombining,setIsCombining]=useState(false);
@@ -412,6 +427,7 @@ function App() {
   const isFetchingRef = useRef(false);
   const isCombiningRef=useRef(false);
   const isRemovingRef=useRef(false);
+  const isMovingProductRef=useRef(false);
   const justDraggedRef = useRef(false);
   const notificationAudioRef=useRef(null);
   const notifiedOrderIdsRef=useRef(new Set());
@@ -467,7 +483,7 @@ const playNotificationSound=useCallback(()=>{
   // Keep an optimistic value while the PUT request is running to prevent polling from changing the button back.
   const pendingPackagingRef = useRef(new Map());
   const fetchApprovals = useCallback(async (silent = false) => {
-    if (isFetchingRef.current||isCombiningRef.current||isRemovingRef.current) {
+    if (isFetchingRef.current||isCombiningRef.current||isRemovingRef.current||isMovingProductRef.current) {
       return;
     }
     isFetchingRef.current = true;
@@ -495,6 +511,7 @@ const playNotificationSound=useCallback(()=>{
           const packedQuantity=clampPackedQuantity(pendingPackedQuantity??serverPackedQuantity,quantity);
           return {
             itemId,
+            record_id:String(item.record_id||""),
             product_id:String(item.product_id||""),
             product_ids:Array.isArray(item.product_ids)?item.product_ids.map(productId=>String(productId||"")).filter(Boolean):[],
             product_code:item.code||"-",
@@ -877,9 +894,57 @@ const playNotificationSound=useCallback(()=>{
       autoScrollFrameRef.current = requestAnimationFrame(runDragAutoScroll);
     }
   };
+  const readDraggedProduct=dataTransfer=>{
+    if(draggingProduct)return draggingProduct;
+    try{
+      const raw=dataTransfer?.getData("application/x-sale-product");
+      return raw?JSON.parse(raw):null;
+    }catch{return null;}
+  };
+  const getDraggedProductState=productDrag=>{
+    const sourceOrder=ordersRef.current.find(order=>order.id===productDrag?.sourceOrderId);
+    const item=sourceOrder?.items.find(product=>product.itemId===productDrag?.itemId);
+    return sourceOrder&&item?{sourceOrder,item}:null;
+  };
+  const moveDraggedProduct=async(productDrag,destination)=>{
+    if(isMovingProductRef.current)return;
+    const current=getDraggedProductState(productDrag);
+    if(!current){setProductMoveNotice({type:"error",message:"The dragged product is no longer available. Refresh and try again."});return;}
+    if(destination.type==="existing_order"){
+      const eligibility=getProductMoveEligibility(current,destination.targetOrder);
+      if(!eligibility.allowed)return;
+    }
+    isMovingProductRef.current=true;
+    setIsMovingProduct(true);
+    setProductMoveNotice({type:"moving",message:`Moving ${current.item.product_code}...`});
+    try{
+      const response=await axios.post(MOVE_PRODUCT_API_URL,{source_sale_id:String(current.sourceOrder.id),source_item_id:String(current.item.itemId),source_record_id:String(current.item.record_id||""),destination:destination.type,target_sale_id:destination.type==="existing_order"?String(destination.targetOrder.id):undefined});
+      if(response.data?.status!==true)throw new Error(response.data?.message||"The server did not confirm the product move.");
+      const targetSaleId=String(response.data.target_sale_id||"");
+      if(destination.type==="new_order"&&targetSaleId){
+        const overrides=getSavedObject(ORDER_TYPE_STORAGE_KEY);
+        overrides[targetSaleId]=destination.targetType;
+        saveObject(ORDER_TYPE_STORAGE_KEY,overrides);
+      }
+      const targetLabel=destination.type==="existing_order"?`Order ${destination.targetOrder.id}`:`new Order ${targetSaleId}`;
+      const warning=response.data.warning?` ${response.data.warning}`:"";
+      setProductMoveNotice({type:response.data.warning?"warning":"success",message:`${current.item.product_code} moved to ${targetLabel}.${warning}`});
+    }catch(error){
+      console.error("Cannot move product",error);
+      const data=error.response?.data;
+      const replacement=data?.replacement_sale_id?` A replacement Order ${data.replacement_sale_id} was created for the source product.`:"";
+      const partial=data?.source_changed&&!data?.source_restored?" The source order may already have changed; refresh and check both orders.":"";
+      setProductMoveNotice({type:"error",message:`${data?.error||data?.message||data?.details||error.message||"Unable to move the product."}${replacement}${partial}`});
+    }finally{
+      isMovingProductRef.current=false;
+      setIsMovingProduct(false);
+      fetchApprovals(true);
+    }
+  };
   const resetDragState = () => {
     stopDragAutoScroll();
     setDraggingOrderId(null);
+    setDraggingProduct(null);
     setDragOverSection(null);
     setDragOverOrderId(null);
     setTrashProximity(0);
@@ -890,12 +955,24 @@ const playNotificationSound=useCallback(()=>{
     }, 180);
   };
   const handleDragStart = (event, orderId) => {
-    if(isCombining||isRemoving){event.preventDefault();return;}
+    if(isCombining||isRemoving||isMovingProduct){event.preventDefault();return;}
     justDraggedRef.current = true;
+    setDraggingProduct(null);
     setDraggingOrderId(orderId);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", orderId);
     event.dataTransfer.setData("application/x-sale-order-id",orderId);
+  };
+  const handleProductDragStart=(event,order,item)=>{
+    event.stopPropagation();
+    if(isCombining||isRemoving||isMovingProduct){event.preventDefault();return;}
+    const productDrag={sourceOrderId:order.id,itemId:item.itemId};
+    justDraggedRef.current=true;
+    setDraggingOrderId(null);
+    setDraggingProduct(productDrag);
+    event.dataTransfer.effectAllowed="move";
+    event.dataTransfer.setData("application/x-sale-product",JSON.stringify(productDrag));
+    event.dataTransfer.setData("text/plain",`product:${order.id}:${item.itemId}`);
   };
   const handleDragEnd = () => {
     resetDragState();
@@ -943,6 +1020,15 @@ const playNotificationSound=useCallback(()=>{
     event.preventDefault();
     event.stopPropagation();
     updateDragAutoScroll(event);
+    const productDrag=readDraggedProduct(event.dataTransfer);
+    if(productDrag){
+      const productState=getDraggedProductState(productDrag);
+      const eligibility=getProductMoveEligibility(productState,targetOrder);
+      event.dataTransfer.dropEffect=eligibility.allowed?"move":"none";
+      setDragOverSection(null);
+      setDragOverOrderId(targetOrder.id);
+      return;
+    }
     const sourceOrderId=draggingOrderId||event.dataTransfer.getData("application/x-sale-order-id")||event.dataTransfer.getData("text/plain");
     const sourceOrder=ordersRef.current.find(order=>order.id===sourceOrderId);
     const eligibility=getOrderMergeEligibility(sourceOrder,targetOrder);
@@ -957,6 +1043,14 @@ const playNotificationSound=useCallback(()=>{
   const handleOrderDrop=(event,targetOrder)=>{
     event.preventDefault();
     event.stopPropagation();
+    const productDrag=readDraggedProduct(event.dataTransfer);
+    if(productDrag){
+      const productState=getDraggedProductState(productDrag);
+      const eligibility=getProductMoveEligibility(productState,targetOrder);
+      resetDragState();
+      if(eligibility.allowed)moveDraggedProduct(productDrag,{type:"existing_order",targetOrder});
+      return;
+    }
     const sourceOrderId=event.dataTransfer.getData("application/x-sale-order-id")||event.dataTransfer.getData("text/plain")||draggingOrderId;
     const sourceOrder=ordersRef.current.find(order=>order.id===sourceOrderId);
     const eligibility=getOrderMergeEligibility(sourceOrder,targetOrder);
@@ -968,6 +1062,13 @@ const playNotificationSound=useCallback(()=>{
   const handleDragOver = (event, sectionType) => {
     updateDragAutoScroll(event);
     setDragOverOrderId(null);
+    const productDrag=readDraggedProduct(event.dataTransfer);
+    if(productDrag){
+      event.preventDefault();
+      event.dataTransfer.dropEffect="move";
+      setDragOverSection(sectionType);
+      return;
+    }
     const draggedOrder = orders.find((order) => order.id === draggingOrderId);
     if (!canDropIntoSection(draggedOrder, sectionType)) {
       event.dataTransfer.dropEffect = "none";
@@ -980,6 +1081,13 @@ const playNotificationSound=useCallback(()=>{
   };
   const handleDrop = async (event, targetType) => {
     event.preventDefault();
+    const productDrag=readDraggedProduct(event.dataTransfer);
+    if(productDrag){
+      event.stopPropagation();
+      resetDragState();
+      moveDraggedProduct(productDrag,{type:"new_order",targetType});
+      return;
+    }
     const orderId =
       event.dataTransfer.getData("text/plain") || draggingOrderId;
     if (!orderId) {
@@ -1089,6 +1197,7 @@ const playNotificationSound=useCallback(()=>{
     const draggedOrder = orders.find(
       (order) => order.id === draggingOrderId
     );
+    const draggedProductState=getDraggedProductState(draggingProduct);
     const isBlockedSendNowTarget = Boolean(
       draggingOrderId &&
       section.type === "send_now" &&
@@ -1104,6 +1213,8 @@ const playNotificationSound=useCallback(()=>{
           ${section.type}
           ${isDragOver ? "drag-over" : ""}
           ${isBlockedSendNowTarget ? "drop-blocked" : ""}
+          ${draggingProduct ? "product-create-enabled" : ""}
+          ${draggingProduct&&isDragOver ? "product-create-active" : ""}
         `}
         style={{
           height: `${CARD_HEIGHT_PX}px`,
@@ -1119,6 +1230,7 @@ const playNotificationSound=useCallback(()=>{
           <h1 className="section-title">{section.title}</h1>
           <span className="order-count">{section.orders.length}</span>
         </div>
+        {draggingProduct&&<div className="product-create-zone">＋ Drop here to create a new order</div>}
         {isBlockedSendNowTarget && (
           <div className="drop-warning">
             Complete all packaging before moving the order to Send Now.
@@ -1138,7 +1250,9 @@ const playNotificationSound=useCallback(()=>{
               {section.orders.length === 0 ? (
                 <tr className="empty-orders">
                   <td colSpan={tableColumnCount}>
-                    {draggingOrderId && !isBlockedSendNowTarget
+                    {draggingProduct
+                      ? "Drop here to create a new order"
+                      : draggingOrderId && !isBlockedSendNowTarget
                       ? `Drop order into ${section.title}`
                       : `No ${section.title} orders`}
                   </td>
@@ -1160,7 +1274,14 @@ const playNotificationSound=useCallback(()=>{
                   const isMergeAllowed=Boolean(isMergeCandidate&&mergeEligibility?.allowed);
                   const isMergeBlocked=Boolean(isMergeCandidate&&!mergeEligibility?.allowed);
                   const isMergeHovered=dragOverOrderId===order.id;
-                  const isNineTechBlockedHover=Boolean(isMergeHovered&&isMergeBlocked&&["nine_tech_mismatch","nine_tech_mixed"].includes(mergeEligibility?.reason));
+                  const productEligibility=draggedProductState?getProductMoveEligibility(draggedProductState,order):null;
+                  const isProductSource=Boolean(draggingProduct&&draggingProduct.sourceOrderId===order.id);
+                  const isProductTarget=Boolean(draggingProduct&&!isProductSource);
+                  const isProductTargetAllowed=Boolean(isProductTarget&&productEligibility?.allowed);
+                  const isProductTargetBlocked=Boolean(isProductTarget&&!productEligibility?.allowed);
+                  const isProductTargetHovered=Boolean(draggingProduct&&dragOverOrderId===order.id);
+                  const blockedReason=draggingProduct?productEligibility?.reason:mergeEligibility?.reason;
+                  const isNineTechBlockedHover=Boolean(isMergeHovered&&(isMergeBlocked||isProductTargetBlocked)&&["nine_tech_mismatch","nine_tech_mixed"].includes(blockedReason));
                   return (
                     <Fragment key={order.id}>
                       <tr
@@ -1174,8 +1295,13 @@ const playNotificationSound=useCallback(()=>{
                           ${isMergeBlocked ? "merge-target-blocked" : ""}
                           ${isMergeHovered&&isMergeAllowed ? "merge-drag-over-allowed" : ""}
                           ${isMergeHovered&&isMergeBlocked ? "merge-drag-over-blocked" : ""}
+                          ${isProductSource ? "product-source-order" : ""}
+                          ${isProductTargetAllowed ? "product-target-allowed" : ""}
+                          ${isProductTargetBlocked ? "product-target-blocked" : ""}
+                          ${isProductTargetHovered&&isProductTargetAllowed ? "product-drag-over-allowed" : ""}
+                          ${isProductTargetHovered&&isProductTargetBlocked ? "product-drag-over-blocked" : ""}
                         `}
-                        draggable={!isCombining&&!isRemoving}
+                        draggable={!isCombining&&!isRemoving&&!isMovingProduct}
                         onDragStart={(event) =>
                           handleDragStart(event, order.id)
                         }
@@ -1247,7 +1373,7 @@ const playNotificationSound=useCallback(()=>{
                       </tr>
                       {isOpen && (
                         <tr
-                          className={`detail ${orderType} ${isMergeAllowed?"merge-target-allowed":""} ${isMergeBlocked?"merge-target-blocked":""} ${isMergeHovered&&isMergeAllowed?"merge-drag-over-allowed":""} ${isMergeHovered&&isMergeBlocked?"merge-drag-over-blocked":""}`}
+                          className={`detail ${orderType} ${isMergeAllowed?"merge-target-allowed":""} ${isMergeBlocked?"merge-target-blocked":""} ${isMergeHovered&&isMergeAllowed?"merge-drag-over-allowed":""} ${isMergeHovered&&isMergeBlocked?"merge-drag-over-blocked":""} ${isProductSource?"product-source-order":""} ${isProductTargetAllowed?"product-target-allowed":""} ${isProductTargetBlocked?"product-target-blocked":""} ${isProductTargetHovered&&isProductTargetAllowed?"product-drag-over-allowed":""} ${isProductTargetHovered&&isProductTargetBlocked?"product-drag-over-blocked":""}`}
                           onDragOver={event=>handleOrderDragOver(event,order)}
                           onDragLeave={event=>handleOrderDragLeave(event,order.id)}
                           onDrop={event=>handleOrderDrop(event,order)}
@@ -1274,11 +1400,16 @@ const playNotificationSound=useCallback(()=>{
                                     order.items.map((item, itemIndex) => (
                                       <tr
                                         key={item.storageKey}
+                                        className={`product-item-row ${draggingProduct?.sourceOrderId===order.id&&draggingProduct?.itemId===item.itemId?"is-product-dragging":""} ${isMovingProduct&&draggingProduct?.sourceOrderId===order.id&&draggingProduct?.itemId===item.itemId?"is-product-moving":""}`}
                                         data-scan-item-key={item.storageKey}
+                                        draggable={!isCombining&&!isRemoving&&!isMovingProduct&&!updatingItemKeys.includes(item.storageKey)}
+                                        onDragStart={event=>handleProductDragStart(event,order,item)}
+                                        onDragEnd={event=>{event.stopPropagation();handleDragEnd();}}
+                                        title="Drag this product to another order, or drop it on a card to create a new order"
                                         style={highlightedItemKey===item.storageKey?{background:"#dcfce7",outline:"3px solid #22c55e",outlineOffset:"-3px",scrollMarginTop:"120px"}:{scrollMarginTop:"120px"}}
                                       >
                                         <td className="product-code">
-                                          {item.product_code}
+                                          <span className="product-drag-handle" aria-hidden="true">⠿</span>{item.product_code}
                                         </td>
                                         <td className="product-description">
                                           {item.product_name}
@@ -1348,7 +1479,7 @@ const playNotificationSound=useCallback(()=>{
 
   return (
     <div
-      className={`page packaging-page ${draggingOrderId?"trash-mode":""} ${trashProximity>0.12?"trash-near":""}`}
+      className={`page packaging-page ${draggingOrderId?"trash-mode":""} ${draggingProduct?"product-drag-mode":""} ${trashProximity>0.12?"trash-near":""}`}
       style={{paddingLeft:`${pageLeftPadding}px`,"--trash-proximity":trashProximity}}
     >
       <div
@@ -1368,7 +1499,7 @@ const playNotificationSound=useCallback(()=>{
         <div>
           <h2>Packaging Queue</h2>
           <p className="page-description">
-            Click an order to expand it. Each product click or scan packs one unit.
+            Click an order to expand it. Click or scan to pack; drag a product to move it.
           </p>
         </div>
         <div className="header-actions">
@@ -1426,6 +1557,7 @@ const playNotificationSound=useCallback(()=>{
           </div>
         </div>
       </div>
+      {productMoveNotice&&<div className={`product-move-notice ${productMoveNotice.type}`} role="status" aria-live="polite">{productMoveNotice.message}</div>}
       <div className="card-grid">
         {orderSectionsWithOrders.map(renderOrderCard)}
       </div>

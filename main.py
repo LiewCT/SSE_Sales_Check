@@ -70,7 +70,7 @@ def build_approved_payload(date_start="",date_end=""):
     return {"draw":"1","start":"0","length":"100","search[value]":json.dumps({"date_start":date_start,"date_end":date_end,"search":"","sale_branch":1,"sale_status":{"Pending":False,"Approved":True,"Rejected":False,"Invoiced":False,"NotInvoiced":False,"PreOrder":False,"Reserved":False},"sale_dealer":"","proforma_invoiced":False,"pro_forma_code":""}),"search[regex]":"false"}
 
 def build_credit_datatable_payload(length,date_start,date_end):
-    payload={"draw":"5","start":"0","length":str(length),"search[value]":json.dumps({"search":"","branch_id":"1","credit_status":{"Valid":True,"Cancelled":True},"einvoice_status":{"submitted":True,"unsubmitted":True},"date_start":date_start,"date_end":date_end}),"search[regex]":"false"}
+    payload={"draw":"5","start":"0","length":str(length),"search[value]":json.dumps({"search":"","branch_id":"1","credit_status":{"Valid":True,"Cancelled":False},"einvoice_status":{"submitted":True,"unsubmitted":True},"date_start":date_start,"date_end":date_end}),"search[regex]":"false"}
     for index in range(9):
         prefix=f"columns[{index}]"
         payload.update({f"{prefix}[data]":str(index),f"{prefix}[name]":"",f"{prefix}[searchable]":"true",f"{prefix}[orderable]":"true",f"{prefix}[search][value]":"",f"{prefix}[search][regex]":"false"})
@@ -157,6 +157,22 @@ def extract_dealer_identity(sale):
         elif value not in(None,""):return normalize_identity(value)
     return ""
 
+def extract_dealer_id(sale):
+    if not isinstance(sale,dict):return ""
+    for key in("dealer","sale_dealer_detail","customer"):
+        nested=sale.get(key)
+        if isinstance(nested,dict):
+            for nested_key in("id","dealer_id","sale_dealer_id","customer_id"):
+                value=nested.get(nested_key)
+                if value not in(None,""):return str(value).strip()
+    for key in("dealer_id","sale_dealer_id","sale_dealer","customer_id"):
+        value=sale.get(key)
+        if isinstance(value,dict):
+            nested_id=extract_dealer_id({"dealer":value})
+            if nested_id:return nested_id
+        elif value not in(None,""):return str(value).strip()
+    return ""
+
 def request_pending_order_metadata(session,headers):
     response=session.post(SSE_APPROVALS_DATATABLE_URL,headers=headers,data=build_approvals_payload(),timeout=REQUEST_TIMEOUT_SECONDS)
     rows=parse_sse_json_response(response).get("data",[])
@@ -174,11 +190,12 @@ def prepare_order_items(records):
     used_item_ids={}
     for item_index,record in enumerate(records if isinstance(records,list) else []):
         if not isinstance(record,dict):continue
+        record_id=str(record.get("id") or record.get("sale_record_id") or record.get("record_id") or "").strip()
         product_id=str(record.get("sale_product") or record.get("product_id") or "").strip()
         product_code=str(record.get("product_code","-"))
         product_name=str(record.get("product_name","-"))
         product_description=str(record.get("product_description") or product_name or "-")
-        items.append({"id":make_unique_item_id(record,item_index,used_item_ids),"product_id":product_id,"code":product_code,"name":product_name,"product_description":product_description,"qty":max(to_number(record.get("sale_qty")),0)})
+        items.append({"id":make_unique_item_id(record,item_index,used_item_ids),"record_id":record_id,"product_id":product_id,"code":product_code,"name":product_name,"product_description":product_description,"qty":max(to_number(record.get("sale_qty")),0)})
     return items
 
 def product_key(item):
@@ -281,6 +298,33 @@ def response_status_is_success(data):
     if not isinstance(data,dict):return False
     return data.get("status") in(True,1,"1","true","True")
 
+def find_order_item(records,item_id,record_id=""):
+    item_id=str(item_id or "").strip()
+    record_id=str(record_id or "").strip()
+    items=prepare_order_items(records)
+    matches=[item for item in items if (record_id and item["record_id"]==record_id) or (item_id and item["id"]==item_id)]
+    if len(matches)!=1:return None,items
+    return matches[0],items
+
+def add_product_to_order(session,headers,sale_id,item):
+    payload={"product_id":str(item["product_id"]),"sale_remark":None,"sale_qty":api_quantity(item["qty"])}
+    response=session.post(f"{SSE_SALES_URL}/{sale_id}/records",headers=headers,json=payload,timeout=REQUEST_TIMEOUT_SECONDS)
+    return parse_sse_json_response(response)
+
+def create_product_order(session,headers,dealer_id,item):
+    payload={"order_list":[{"sale_product":str(item["product_id"]),"sale_qty":to_number(item["qty"]),"pre_order":0,"warehouse_id":1}],"sale_remark":"","sale_dealer":str(dealer_id),"branch_id":1}
+    response=session.post(f"{SSE_SALES_URL}?userdiscount=1",headers=headers,json=payload,timeout=REQUEST_TIMEOUT_SECONDS)
+    return parse_sse_json_response(response)
+
+def restore_source_product(session,headers,source_sale_id,dealer_id,item,source_was_rejected):
+    try:
+        data=create_product_order(session,headers,dealer_id,item) if source_was_rejected else add_product_to_order(session,headers,source_sale_id,item)
+        restored=response_status_is_success(data)
+        return {"restored":restored,"replacement_sale_id":str(data.get("sale_id") or "") if source_was_rejected and restored else "","message":str(data.get("message") or "")}
+    except(PermissionError,requests.RequestException,RuntimeError,KeyError,TypeError,ValueError,json.JSONDecodeError) as error:
+        app.logger.exception("Unable to restore source product after destination failure")
+        return {"restored":False,"replacement_sale_id":"","message":str(error)}
+
 @app.route("/health",methods=["GET"])
 def health():return jsonify({"status":"ok"})
 
@@ -342,6 +386,96 @@ def approvals():
     except sqlite3.Error as error:
         app.logger.exception("Packaging database error")
         return jsonify({"error":"Packaging status database error.","details":str(error)}),500
+
+@app.route("/move-product",methods=["POST"])
+def move_product():
+    body=request.get_json(silent=True)
+    if not isinstance(body,dict):return jsonify({"error":"JSON body is required."}),400
+    source_sale_id=str(body.get("source_sale_id","")).strip()
+    source_item_id=str(body.get("source_item_id","")).strip()
+    source_record_id=str(body.get("source_record_id","")).strip()
+    destination=str(body.get("destination","")).strip().lower()
+    target_sale_id=str(body.get("target_sale_id","")).strip()
+    if not source_sale_id:return jsonify({"error":"source_sale_id is required."}),400
+    if not source_item_id and not source_record_id:return jsonify({"error":"source_item_id or source_record_id is required."}),400
+    if destination not in("existing_order","new_order"):return jsonify({"error":"destination must be existing_order or new_order."}),400
+    if destination=="existing_order" and not target_sale_id:return jsonify({"error":"target_sale_id is required for an existing order."}),400
+    if destination=="existing_order" and source_sale_id==target_sale_id:return jsonify({"error":"Dropping a product on its own order does not move it."}),400
+    session=build_sse_session()
+    headers=build_sse_headers(f"https://ssegroup.com.my/approvals/{source_sale_id}")
+    json_headers={**headers,"Content-Type":"application/json","Accept":"application/json, text/plain, */*"}
+    source_changed=False
+    source_was_rejected=False
+    moved_item=None
+    source_items=[]
+    source_dealer_id=""
+    destination_sale_id=target_sale_id
+    try:
+        metadata=request_pending_order_metadata(session,headers)
+        source_sale,source_records=request_sale(session,source_sale_id,headers)
+        moved_item,source_items=find_order_item(source_records,source_item_id,source_record_id)
+        if not moved_item:return jsonify({"error":"The dragged product no longer exists in the source order. Refresh and try again."}),409
+        if not moved_item["product_id"] or to_number(moved_item["qty"])<=0:return jsonify({"error":"The dragged product has no valid product ID or quantity."}),400
+        source_dealer=extract_dealer_identity(source_sale) or normalize_identity(metadata.get(source_sale_id,{}).get("dealer"))
+        source_dealer_id=extract_dealer_id(source_sale)
+        if not source_dealer:return jsonify({"error":"Unable to verify the source dealer. The product was not changed."}),409
+        target_items_before=[]
+        if destination=="existing_order":
+            target_sale,target_records_before=request_sale(session,target_sale_id,headers)
+            target_items_before=prepare_order_items(target_records_before)
+            target_dealer=extract_dealer_identity(target_sale) or normalize_identity(metadata.get(target_sale_id,{}).get("dealer"))
+            if not target_dealer:return jsonify({"error":"Unable to verify the target dealer. The product was not changed."}),409
+            if source_dealer!=target_dealer:return jsonify({"error":"Products cannot be moved between different dealers."}),409
+            target_group=get_order_product_group(target_items_before)
+            moved_group=get_order_product_group([moved_item])
+            if target_group=="mixed":return jsonify({"error":"A product cannot be added to an order already mixing 9 Tech and normal products."}),409
+            if target_group!="empty" and target_group!=moved_group:return jsonify({"error":"9 Tech products cannot be mixed with normal products."}),409
+        elif not source_dealer_id:
+            return jsonify({"error":"Unable to find the dealer ID required to create the new order. The product was not changed."}),409
+        with get_database_connection() as connection:
+            source_snapshot=read_packaging_snapshot(connection,source_sale_id,[moved_item])
+            target_snapshot=read_packaging_snapshot(connection,target_sale_id,target_items_before) if target_sale_id else {}
+        source_was_rejected=len(source_items)==1
+        if source_was_rejected:
+            source_response=session.put(f"{SSE_SALES_URL}/{source_sale_id}/reject-with-proforma",headers=json_headers,json={},timeout=REQUEST_TIMEOUT_SECONDS)
+        else:
+            remove_record_id=moved_item["record_id"] or moved_item["id"].split("::",1)[0]
+            if not remove_record_id:return jsonify({"error":"Unable to find the sale record ID required to remove this product."}),409
+            source_response=session.delete(f"{SSE_SALES_URL}/{source_sale_id}/records/{remove_record_id}/remove",headers=json_headers,json={},timeout=REQUEST_TIMEOUT_SECONDS)
+        source_data=parse_sse_json_response(source_response)
+        if not response_status_is_success(source_data):return jsonify({"error":source_data.get("message") or "The product could not be removed from its source order.","source_changed":False}),502
+        source_changed=True
+        destination_data=add_product_to_order(session,json_headers,target_sale_id,moved_item) if destination=="existing_order" else create_product_order(session,json_headers,source_dealer_id,moved_item)
+        if not response_status_is_success(destination_data):
+            rollback=restore_source_product(session,json_headers,source_sale_id,source_dealer_id,moved_item,source_was_rejected)
+            return jsonify({"error":destination_data.get("message") or "The destination rejected the product.","source_changed":True,"source_restored":rollback["restored"],"replacement_sale_id":rollback["replacement_sale_id"],"rollback_message":rollback["message"]}),502
+        if destination=="new_order":
+            destination_sale_id=str(destination_data.get("sale_id") or "").strip()
+            if not destination_sale_id:
+                return jsonify({"error":"The new order was created but SSE did not return its sale ID.","source_changed":True,"destination_changed":True}),502
+        packaging_status_preserved=True
+        packaging_warning=""
+        try:
+            _,target_records_after=request_sale(session,destination_sale_id,headers)
+            target_items_after=prepare_order_items(target_records_after)
+            with get_database_connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                transfer_combined_packaging(connection,source_sale_id,destination_sale_id,[moved_item],target_items_before,target_items_after,source_snapshot,target_snapshot)
+                if source_was_rejected:connection.execute("DELETE FROM packaging_status WHERE order_id=?",(source_sale_id,))
+                else:connection.execute("DELETE FROM packaging_status WHERE order_id=? AND item_id=?",(source_sale_id,moved_item["id"]))
+        except(sqlite3.Error,RuntimeError,KeyError,TypeError,ValueError,json.JSONDecodeError,requests.RequestException) as error:
+            packaging_status_preserved=False
+            packaging_warning="Product moved, but packaging progress could not be matched automatically."
+            app.logger.exception("Moved product packaging status could not be preserved")
+        return jsonify({"status":True,"message":"Product moved successfully.","source_sale_id":source_sale_id,"source_order_removed":source_was_rejected,"source_product_removed":True,"target_sale_id":destination_sale_id,"destination":destination,"product_id":moved_item["product_id"],"product_code":moved_item["code"],"quantity":moved_item["qty"],"packaging_status_preserved":packaging_status_preserved,"warning":packaging_warning,"sse_response":destination_data})
+    except PermissionError as error:
+        return jsonify({"error":str(error),"source_changed":source_changed}),401
+    except requests.RequestException as error:
+        app.logger.exception("SSE move-product request failed")
+        return jsonify({"error":"Unable to complete the SSE product move request.","details":str(error),"source_changed":source_changed,"state_unknown":source_changed}),502
+    except(sqlite3.Error,RuntimeError,KeyError,TypeError,ValueError,json.JSONDecodeError) as error:
+        app.logger.exception("Move product failed")
+        return jsonify({"error":"Unable to safely move the product.","details":str(error),"source_changed":source_changed}),500
 
 @app.route("/combine-orders",methods=["POST"])
 def combine_orders():
