@@ -119,13 +119,16 @@ h2 {margin:0;font-size:32px;}
 .item-table th:nth-child(4),.item-table td:nth-child(4) {width:21%;text-align:center;}
 /* IMPORTANT PRODUCT TEXT */
 .product-code {font-family:Consolas,"Courier New",monospace;font-size:18px;font-weight:bold;letter-spacing:0.3px;}
+.product-code,.product-description {cursor:text;user-select:text;-webkit-user-select:text;}
 .product-description {font-size:18px;font-weight:bold;line-height:1.35;}
+.product-text-toggle {padding:0;border:0;background:transparent;color:inherit;font:inherit;font-weight:bold;cursor:pointer;}
+.product-text-toggle:hover {text-decoration:underline;}
 .quantity-cell {font-size:18px;font-weight:bold;}
 /* PRODUCT DRAG AND DROP */
-.product-item-row {cursor:grab;transition:opacity .15s ease,transform .15s ease,filter .15s ease,box-shadow .15s ease;}
-.product-item-row:active {cursor:grabbing;}
+.product-item-row {cursor:default;transition:opacity .15s ease,transform .15s ease,filter .15s ease,box-shadow .15s ease;}
 .product-item-row:hover {background:rgba(255,255,255,.92);box-shadow:inset 4px 0 0 #2563eb;}
-.product-drag-handle {display:inline-block;width:0;margin-right:0;color:#2563eb;font-family:Arial,sans-serif;font-size:21px;line-height:1;opacity:0;overflow:hidden;vertical-align:-2px;transition:width .15s ease,margin .15s ease,opacity .15s ease;}
+.product-drag-handle {display:inline-block;width:0;margin-right:0;color:#2563eb;font-family:Arial,sans-serif;font-size:21px;line-height:1;opacity:0;overflow:hidden;vertical-align:-2px;cursor:grab;user-select:none;-webkit-user-select:none;transition:width .15s ease,margin .15s ease,opacity .15s ease;}
+.product-drag-handle:active {cursor:grabbing;}
 .product-item-row:hover .product-drag-handle,.product-item-row:focus-within .product-drag-handle {width:18px;margin-right:7px;opacity:1;}
 .product-item-row.is-product-dragging {opacity:.38;filter:grayscale(.35);transform:scale(.985);}
 .order-row.product-target-allowed>td,.detail.product-target-allowed>td {cursor:copy;box-shadow:inset 0 0 0 2px rgba(37,99,235,.58);}

@@ -420,6 +420,7 @@ function App() {
   const [scanCode,setScanCode]=useState("");
   const [scanResult,setScanResult]=useState({type:"ready",message:"Scanner ready"});
   const [highlightedItemKey,setHighlightedItemKey]=useState(null);
+  const [showProductDescription,setShowProductDescription]=useState(true);
   const ordersRef=useRef([]);
   const updatingItemKeysRef=useRef(new Set());
   const scanQueueRef=useRef(new Map());
@@ -918,7 +919,7 @@ const playNotificationSound=useCallback(()=>{
     setIsMovingProduct(true);
     setProductMoveNotice({type:"moving",message:`Moving ${current.item.product_code}...`});
     try{
-      const response=await axios.post(MOVE_PRODUCT_API_URL,{source_sale_id:String(current.sourceOrder.id),source_item_id:String(current.item.itemId),source_record_id:String(current.item.record_id||""),destination:destination.type,target_sale_id:destination.type==="existing_order"?String(destination.targetOrder.id):undefined});
+      const response=await axios.post(MOVE_PRODUCT_API_URL,{source_sale_id:String(current.sourceOrder.id),source_product_id:String(current.item.product_id||""),source_record_id:String(current.item.record_id||""),source_dealer_id:String(current.sourceOrder.dealer_id||""),destination:destination.type,target_sale_id:destination.type==="existing_order"?String(destination.targetOrder.id):undefined});
       if(response.data?.status!==true)throw new Error(response.data?.message||"The server did not confirm the product move.");
       const targetSaleId=String(response.data.target_sale_id||"");
       if(destination.type==="new_order"&&targetSaleId){
@@ -1384,7 +1385,7 @@ const playNotificationSound=useCallback(()=>{
                                 <thead>
                                   <tr>
                                     <th>Code</th>
-                                    <th>Description</th>
+                                    <th><button type="button" className="product-text-toggle" onClick={()=>setShowProductDescription(value=>!value)} title={`Show product ${showProductDescription?"name":"description"}`}>{showProductDescription?"Description":"Name"} ⇄</button></th>
                                     <th>Quantity</th>
                                     <th>Status</th>
                                   </tr>
@@ -1402,17 +1403,13 @@ const playNotificationSound=useCallback(()=>{
                                         key={item.storageKey}
                                         className={`product-item-row ${draggingProduct?.sourceOrderId===order.id&&draggingProduct?.itemId===item.itemId?"is-product-dragging":""} ${isMovingProduct&&draggingProduct?.sourceOrderId===order.id&&draggingProduct?.itemId===item.itemId?"is-product-moving":""}`}
                                         data-scan-item-key={item.storageKey}
-                                        draggable={!isCombining&&!isRemoving&&!isMovingProduct&&!updatingItemKeys.includes(item.storageKey)}
-                                        onDragStart={event=>handleProductDragStart(event,order,item)}
-                                        onDragEnd={event=>{event.stopPropagation();handleDragEnd();}}
-                                        title="Drag this product to another order, or drop it on a card to create a new order"
                                         style={highlightedItemKey===item.storageKey?{background:"#dcfce7",outline:"3px solid #22c55e",outlineOffset:"-3px",scrollMarginTop:"120px"}:{scrollMarginTop:"120px"}}
                                       >
                                         <td className="product-code">
-                                          <span className="product-drag-handle" aria-hidden="true">⠿</span>{item.product_code}
+                                          <span className="product-drag-handle" draggable={!isCombining&&!isRemoving&&!isMovingProduct&&!updatingItemKeys.includes(item.storageKey)} onDragStart={event=>handleProductDragStart(event,order,item)} onDragEnd={event=>{event.stopPropagation();handleDragEnd();}} title="Drag this product to another order, or drop it on a card to create a new order" aria-label="Drag product">⠿</span>{item.product_code}
                                         </td>
                                         <td className="product-description">
-                                          {item.product_name}
+                                          {showProductDescription?(item.product_description||item.product_name):item.product_name}
                                         </td>
                                         <td className="quantity-cell">
                                           {item.quantity}
