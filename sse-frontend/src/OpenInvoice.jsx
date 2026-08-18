@@ -14,7 +14,7 @@ function OpenInvoice({apiBaseUrl,onBack}){
   const[refreshing,setRefreshing]=useState(false);
   const[error,setError]=useState("");
   const[lastUpdated,setLastUpdated]=useState(null);
-  const[dateStart,setDateStart]=useState(()=>getMonthStart());
+  const[dateStart,setDateStart]=useState(()=>getToday());
   const[dateEnd,setDateEnd]=useState(()=>getToday());
   const fetchingRef=useRef(false);
 

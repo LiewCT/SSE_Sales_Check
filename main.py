@@ -102,6 +102,16 @@ def make_unique_item_id(record,item_index,used_item_ids):
     used_item_ids[base]=occurrence+1
     return base if occurrence==0 else f"{base}::{occurrence}"
 
+def extract_product_id(record):
+    for key in("sale_product","product_id"):
+        value=record.get(key)
+        if isinstance(value,dict):
+            for nested_key in("id","product_id","sale_product"):
+                nested=value.get(nested_key)
+                if nested not in(None,""):return str(nested).strip()
+        elif value not in(None,""):return str(value).strip()
+    return ""
+
 def normalize_top_remark(value):
     if value is None:return ""
     if isinstance(value,(list,tuple)):
@@ -191,7 +201,7 @@ def prepare_order_items(records):
     for item_index,record in enumerate(records if isinstance(records,list) else []):
         if not isinstance(record,dict):continue
         record_id=str(record.get("id") or record.get("sale_record_id") or record.get("record_id") or "").strip()
-        product_id=str(record.get("sale_product") or record.get("product_id") or "").strip()
+        product_id=extract_product_id(record)
         product_code=str(record.get("product_code","-"))
         product_name=str(record.get("product_name","-"))
         product_description=str(record.get("product_description") or product_name or "-")
@@ -292,27 +302,31 @@ def transfer_combined_packaging(connection,source_sale_id,target_sale_id,source_
 
 def api_quantity(value):
     number=to_number(value)
-    return str(int(number)) if isinstance(number,(int,float)) and float(number).is_integer() else str(number)
+    return int(number) if isinstance(number,(int,float)) and float(number).is_integer() else number
+
+def api_identifier(value):
+    text=str(value or "").strip()
+    return int(text) if text.isdigit() else text
 
 def response_status_is_success(data):
     if not isinstance(data,dict):return False
     return data.get("status") in(True,1,"1","true","True")
 
-def find_order_item(records,item_id,record_id=""):
-    item_id=str(item_id or "").strip()
+def find_order_item(records,product_id,record_id=""):
+    product_id=str(product_id or "").strip()
     record_id=str(record_id or "").strip()
     items=prepare_order_items(records)
-    matches=[item for item in items if (record_id and item["record_id"]==record_id) or (item_id and item["id"]==item_id)]
+    matches=[item for item in items if item["product_id"]==product_id and (not record_id or item["record_id"]==record_id)]
     if len(matches)!=1:return None,items
     return matches[0],items
 
 def add_product_to_order(session,headers,sale_id,item):
-    payload={"product_id":str(item["product_id"]),"sale_remark":None,"sale_qty":api_quantity(item["qty"])}
+    payload={"product_id":api_identifier(item["product_id"]),"sale_remark":None,"sale_qty":api_quantity(item["qty"])}
     response=session.post(f"{SSE_SALES_URL}/{sale_id}/records",headers=headers,json=payload,timeout=REQUEST_TIMEOUT_SECONDS)
     return parse_sse_json_response(response)
 
 def create_product_order(session,headers,dealer_id,item):
-    payload={"order_list":[{"sale_product":str(item["product_id"]),"sale_qty":to_number(item["qty"]),"pre_order":0,"warehouse_id":1}],"sale_remark":"","sale_dealer":str(dealer_id),"branch_id":1}
+    payload={"order_list":[{"sale_product":api_identifier(item["product_id"]),"sale_qty":api_quantity(item["qty"]),"pre_order":0,"warehouse_id":1}],"sale_remark":"","sale_dealer":api_identifier(dealer_id),"branch_id":1}
     response=session.post(f"{SSE_SALES_URL}?userdiscount=1",headers=headers,json=payload,timeout=REQUEST_TIMEOUT_SECONDS)
     return parse_sse_json_response(response)
 
@@ -375,7 +389,7 @@ def approvals():
                 link=row[10].split('href="',1)[1].split('"',1)[0]
                 sale_id=link.rstrip("/").split("/")[-1]
                 sale,records=request_sale(session,sale_id,headers)
-                result.append({"id":str(sale_id),"dealer_id":extract_dealer_identity(sale) or normalize_identity(row[3]),"dealer":row[3],"remark":normalize_top_remark(row[5]),"date":row[9],"link":link,"items":build_order_items(connection,sale_id,records)})
+                result.append({"id":str(sale_id),"dealer_id":extract_dealer_id(sale),"dealer":row[3],"remark":normalize_top_remark(row[5]),"date":row[9],"link":link,"items":build_order_items(connection,sale_id,records)})
         return jsonify(result)
     except requests.RequestException as error:
         app.logger.exception("SSE request failed")
@@ -392,12 +406,13 @@ def move_product():
     body=request.get_json(silent=True)
     if not isinstance(body,dict):return jsonify({"error":"JSON body is required."}),400
     source_sale_id=str(body.get("source_sale_id","")).strip()
-    source_item_id=str(body.get("source_item_id","")).strip()
+    source_product_id=str(body.get("source_product_id","")).strip()
     source_record_id=str(body.get("source_record_id","")).strip()
+    requested_dealer_id=str(body.get("source_dealer_id","")).strip()
     destination=str(body.get("destination","")).strip().lower()
     target_sale_id=str(body.get("target_sale_id","")).strip()
     if not source_sale_id:return jsonify({"error":"source_sale_id is required."}),400
-    if not source_item_id and not source_record_id:return jsonify({"error":"source_item_id or source_record_id is required."}),400
+    if not source_product_id:return jsonify({"error":"source_product_id is required."}),400
     if destination not in("existing_order","new_order"):return jsonify({"error":"destination must be existing_order or new_order."}),400
     if destination=="existing_order" and not target_sale_id:return jsonify({"error":"target_sale_id is required for an existing order."}),400
     if destination=="existing_order" and source_sale_id==target_sale_id:return jsonify({"error":"Dropping a product on its own order does not move it."}),400
@@ -413,11 +428,11 @@ def move_product():
     try:
         metadata=request_pending_order_metadata(session,headers)
         source_sale,source_records=request_sale(session,source_sale_id,headers)
-        moved_item,source_items=find_order_item(source_records,source_item_id,source_record_id)
+        moved_item,source_items=find_order_item(source_records,source_product_id,source_record_id)
         if not moved_item:return jsonify({"error":"The dragged product no longer exists in the source order. Refresh and try again."}),409
         if not moved_item["product_id"] or to_number(moved_item["qty"])<=0:return jsonify({"error":"The dragged product has no valid product ID or quantity."}),400
         source_dealer=extract_dealer_identity(source_sale) or normalize_identity(metadata.get(source_sale_id,{}).get("dealer"))
-        source_dealer_id=extract_dealer_id(source_sale)
+        source_dealer_id=extract_dealer_id(source_sale) or (requested_dealer_id if requested_dealer_id.isdigit() else "")
         if not source_dealer:return jsonify({"error":"Unable to verify the source dealer. The product was not changed."}),409
         target_items_before=[]
         if destination=="existing_order":
@@ -439,9 +454,9 @@ def move_product():
         if source_was_rejected:
             source_response=session.put(f"{SSE_SALES_URL}/{source_sale_id}/reject-with-proforma",headers=json_headers,json={},timeout=REQUEST_TIMEOUT_SECONDS)
         else:
-            remove_record_id=moved_item["record_id"] or moved_item["id"].split("::",1)[0]
-            if not remove_record_id:return jsonify({"error":"Unable to find the sale record ID required to remove this product."}),409
-            source_response=session.delete(f"{SSE_SALES_URL}/{source_sale_id}/records/{remove_record_id}/remove",headers=json_headers,json={},timeout=REQUEST_TIMEOUT_SECONDS)
+            remove_product_id=str(moved_item["product_id"] or "").strip()
+            if not remove_product_id:return jsonify({"error":"Unable to find the product ID required to remove this product."}),409
+            source_response=session.delete(f"{SSE_SALES_URL}/{source_sale_id}/records/{remove_product_id}/remove",headers=json_headers,json={},timeout=REQUEST_TIMEOUT_SECONDS)
         source_data=parse_sse_json_response(source_response)
         if not response_status_is_success(source_data):return jsonify({"error":source_data.get("message") or "The product could not be removed from its source order.","source_changed":False}),502
         source_changed=True
