@@ -29,7 +29,10 @@ const SERVER_SNAPSHOT_STORAGE_KEY = "packaging-server-snapshot";
 const ORDER_CHANGES_STORAGE_KEY = "packaging-order-changes";
 const NINE_TECH_PATTERN=/9[\s_-]*tech\b/i;
 
-const getPageFromPath=()=>location.pathname==="/credit-note-report"?"credit-note-report":location.pathname==="/open-invoice"?"open-invoice":location.pathname==="/mobile-scanner"?"mobile-scanner":"packaging";
+const getPageFromPath=()=>{
+  const path=location.hash.slice(1)||location.pathname;
+  return path==="/credit-note-report"?"credit-note-report":path==="/open-invoice"?"open-invoice":path==="/mobile-scanner"?"mobile-scanner":"packaging";
+};
 const normalizeProductCode=value=>String(value||"").replace(/[\r\n\t]/g,"").trim().toUpperCase();
 const toQuantity=value=>Math.max(0,Number(value)||0);
 const clampPackedQuantity=(value,quantity)=>Math.min(toQuantity(quantity),toQuantity(value));
@@ -443,11 +446,26 @@ function App() {
   const trashZoneRef=useRef(null);
 
   const navigate=useCallback((path,state={})=>{
-    window.history.pushState(state,"",path);
+    window.history.pushState(state,"",path==="/" ? "/" : `/#${path}`);
     setNavigationState(state);
     setCurrentPage(getPageFromPath());
     window.scrollTo({top:0,left:0});
   },[]);
+
+  const handleLinkClick=(event,path)=>{
+    if(event.button!==0||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+    event.preventDefault();
+    navigate(path,{apiBaseUrl:API_BASE_URL});
+  };
+
+  useEffect(()=>{
+    document.title={
+      packaging:"Packaging Queue",
+      "open-invoice":"Open Invoice",
+      "credit-note-report":"Credits Note Report",
+      "mobile-scanner":"Mobile Scanner"
+    }[currentPage]||"SSE Sales Check";
+  },[currentPage]);
 
   useEffect(()=>{
     const handlePopState=(event)=>{
@@ -1505,7 +1523,7 @@ const playNotificationSound=useCallback(()=>{
           </p>
         </div>
         <div className="header-actions">
-          <button type="button" onClick={()=>navigate("/mobile-scanner",{apiBaseUrl:API_BASE_URL})} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#7c3aed",color:"#fff",cursor:"pointer",fontWeight:"700"}}>Mobile Scan</button>
+          <a href="/#/mobile-scanner" onClick={event=>handleLinkClick(event,"/mobile-scanner")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#7c3aed",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none"}}>Mobile Scan</a>
           <div style={{display:"flex",flexDirection:"column",gap:"5px",minWidth:"280px"}}>
             <div style={{display:"flex",gap:"6px"}}>
               <input
@@ -1522,28 +1540,8 @@ const playNotificationSound=useCallback(()=>{
             </div>
             <div style={{fontSize:"12px",fontWeight:"700",color:scanResult.type==="success"?"#15803d":scanResult.type==="error"?"#dc2626":scanResult.type==="warning"?"#b45309":scanResult.type==="saving"?"#2563eb":"#475569"}}>{scanResult.message}</div>
           </div>
-          <button
-            type="button"
-            onClick={() => navigate("/open-invoice",{apiBaseUrl:API_BASE_URL})}
-            style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#059669",color:"#fff",cursor:"pointer",fontWeight:"700"}}
-          >
-            Open Invoice
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("/credit-note-report",{apiBaseUrl:API_BASE_URL})}
-            style={{
-              padding: "10px 16px",
-              border: "none",
-              borderRadius: "8px",
-              background: "#2563eb",
-              color: "#ffffff",
-              cursor: "pointer",
-              fontWeight: "700"
-            }}
-          >
-            Credits Note Report
-          </button>
+          <a href="/#/open-invoice" onClick={event=>handleLinkClick(event,"/open-invoice")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#059669",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none"}}>Open Invoice</a>
+          <a href="/#/credit-note-report" onClick={event=>handleLinkClick(event,"/credit-note-report")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#2563eb",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none"}}>Credits Note Report</a>
 
           <PwaInstallButton />
           <div className="live-panel">
