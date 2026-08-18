@@ -1403,10 +1403,15 @@ const playNotificationSound=useCallback(()=>{
                                         key={item.storageKey}
                                         className={`product-item-row ${draggingProduct?.sourceOrderId===order.id&&draggingProduct?.itemId===item.itemId?"is-product-dragging":""} ${isMovingProduct&&draggingProduct?.sourceOrderId===order.id&&draggingProduct?.itemId===item.itemId?"is-product-moving":""}`}
                                         data-scan-item-key={item.storageKey}
+                                        draggable={false}
+                                        onMouseDown={event=>{event.currentTarget.draggable=Boolean(event.target.closest(".product-drag-handle"))&&!isCombining&&!isRemoving&&!isMovingProduct&&!updatingItemKeys.includes(item.storageKey);}}
+                                        onMouseUp={event=>{event.currentTarget.draggable=false;}}
+                                        onDragStart={event=>handleProductDragStart(event,order,item)}
+                                        onDragEnd={event=>{event.currentTarget.draggable=false;event.stopPropagation();handleDragEnd();}}
                                         style={highlightedItemKey===item.storageKey?{background:"#dcfce7",outline:"3px solid #22c55e",outlineOffset:"-3px",scrollMarginTop:"120px"}:{scrollMarginTop:"120px"}}
                                       >
                                         <td className="product-code">
-                                          <span className="product-drag-handle" draggable={!isCombining&&!isRemoving&&!isMovingProduct&&!updatingItemKeys.includes(item.storageKey)} onDragStart={event=>handleProductDragStart(event,order,item)} onDragEnd={event=>{event.stopPropagation();handleDragEnd();}} title="Drag this product to another order, or drop it on a card to create a new order" aria-label="Drag product">⠿</span>{item.product_code}
+                                          <span className="product-drag-handle" title="Drag this product to another order, or drop it on a card to create a new order" aria-label="Drag product">⠿</span>{item.product_code}
                                         </td>
                                         <td className="product-description">
                                           {showProductDescription?(item.product_description||item.product_name):item.product_name}
