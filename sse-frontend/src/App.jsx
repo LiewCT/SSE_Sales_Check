@@ -424,8 +424,6 @@ function App() {
   const [scanResult,setScanResult]=useState({type:"ready",message:"Scanner ready"});
   const [highlightedItemKey,setHighlightedItemKey]=useState(null);
   const [showProductDescription,setShowProductDescription]=useState(true);
-  const [isProductPanelOpen,setIsProductPanelOpen]=useState(true);
-  const [openProductCategories,setOpenProductCategories]=useState({LCD:true,Battery:true,Others:true});
   const ordersRef=useRef([]);
   const updatingItemKeysRef=useRef(new Set());
   const scanQueueRef=useRef(new Map());
@@ -659,23 +657,6 @@ const playNotificationSound=useCallback(()=>{
       };
     });
   }, [orders]);
-  const productSummary=useMemo(()=>{
-    const products=new Map();
-    orders.filter(order=>getResolvedOrderType(order)!=="hold").forEach(order=>order.items.forEach(item=>{
-      const code=normalizeProductCode(item.product_code);
-      const key=code||String(item.product_name||item.itemId).trim().toLowerCase();
-      const current=products.get(key)||{product_code:item.product_code||"-",product_name:item.product_name||"-",product_description:item.product_description||"",quantity:0,packedQuantity:0};
-      current.quantity+=toQuantity(item.quantity);
-      current.packedQuantity+=clampPackedQuantity(item.packedQuantity,item.quantity);
-      products.set(key,current);
-    }));
-    return [...products.values()].sort((a,b)=>String(a.product_code).localeCompare(String(b.product_code),undefined,{numeric:true,sensitivity:"base"}));
-  },[orders]);
-  const productCategories=useMemo(()=>[
-    {name:"LCD",products:productSummary.filter(product=>normalizeProductCode(product.product_code).startsWith("LCD"))},
-    {name:"Battery",products:productSummary.filter(product=>normalizeProductCode(product.product_code).startsWith("BT"))},
-    {name:"Others",products:productSummary.filter(product=>{const code=normalizeProductCode(product.product_code);return !code.startsWith("LCD")&&!code.startsWith("BT");})}
-  ],[productSummary]);
   const markOrderAsSeen = (orderId) => {
     setNewOrderIds((currentNewIds) =>
       currentNewIds.filter((id) => id !== orderId)
@@ -1576,46 +1557,9 @@ const playNotificationSound=useCallback(()=>{
           </div>
         </div>
       </div>
-      <div className={`packaging-layout ${isProductPanelOpen?"panel-open":"panel-collapsed"}`}>
-        <main className="packaging-main">
-          {productMoveNotice&&<div className={`product-move-notice ${productMoveNotice.type}`} role="status" aria-live="polite">{productMoveNotice.message}</div>}
-          <div className="card-grid">{orderSectionsWithOrders.map(renderOrderCard)}</div>
-        </main>
-        <aside className="product-summary-panel" aria-label="All products excluding Hold orders">
-          <button type="button" className="product-panel-toggle" onClick={()=>setIsProductPanelOpen(value=>!value)} aria-expanded={isProductPanelOpen} title={isProductPanelOpen?"Collapse product panel":"Expand product panel"}>
-            <span className="product-panel-arrow">{isProductPanelOpen?"›":"‹"}</span>
-            {!isProductPanelOpen&&<span className="product-panel-vertical-title">Products</span>}
-          </button>
-          {isProductPanelOpen&&<div className="product-panel-content">
-            <div className="product-panel-heading">
-              <div><h3>All Products</h3><p>Excludes Hold orders</p></div>
-              <span>{productSummary.length}</span>
-            </div>
-            <div className="product-summary-list">
-              {productSummary.length===0?<div className="product-summary-empty">No products found</div>:productCategories.map(category=>{
-                const isOpen=openProductCategories[category.name];
-                const categoryQuantity=category.products.reduce((total,product)=>total+product.quantity,0);
-                return <section className="product-category" key={category.name}>
-                  <button type="button" className="product-category-toggle" onClick={()=>setOpenProductCategories(current=>({...current,[category.name]:!current[category.name]}))} aria-expanded={isOpen}>
-                    <span className="product-category-arrow">{isOpen?"▼":"▶"}</span>
-                    <strong>{category.name}</strong>
-                    <span>{category.products.length} products · Qty {categoryQuantity}</span>
-                  </button>
-                  {isOpen&&<div className="product-category-items">
-                    {category.products.length===0?<div className="product-category-empty">No products</div>:category.products.map(product=>{
-                      const statusClass=product.packedQuantity<=0?"not-packed-status":product.packedQuantity>=product.quantity?"packaged-status":"ongoing-status";
-                      return <article className="product-summary-item" key={normalizeProductCode(product.product_code)||product.product_name}>
-                        <div className="product-summary-code">{product.product_code}</div>
-                        <div className="product-summary-name">{product.product_description||product.product_name}</div>
-                        <div className="product-summary-bottom"><strong>Quantity {product.quantity}</strong><span className={`pack-status ${statusClass}`}>{product.packedQuantity}/{product.quantity}</span></div>
-                      </article>;
-                    })}
-                  </div>}
-                </section>;
-              })}
-            </div>
-          </div>}
-        </aside>
+      {productMoveNotice&&<div className={`product-move-notice ${productMoveNotice.type}`} role="status" aria-live="polite">{productMoveNotice.message}</div>}
+      <div className="card-grid">
+        {orderSectionsWithOrders.map(renderOrderCard)}
       </div>
       {removeDialog&&<div className="remove-modal-backdrop" role="presentation">
         <div className="remove-modal" role="dialog" aria-modal="true" aria-labelledby="remove-order-title">
