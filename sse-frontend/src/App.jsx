@@ -420,6 +420,7 @@ function App() {
   const [orderChanges, setOrderChanges] = useState(() => getSavedObject(ORDER_CHANGES_STORAGE_KEY));
   const [updatingItemKeys, setUpdatingItemKeys] = useState([]);
   const [approvingOrderIds, setApprovingOrderIds] = useState([]);
+  const [isApprovingAll,setIsApprovingAll]=useState(false);
   const [scanCode,setScanCode]=useState("");
   const [scanResult,setScanResult]=useState({type:"ready",message:"Scanner ready"});
   const [highlightedItemKey,setHighlightedItemKey]=useState(null);
@@ -872,6 +873,13 @@ const playNotificationSound=useCallback(()=>{
       window.alert(error.response?.data?.error || error.response?.data?.details || "Unable to approve the order. Please try again.");
     }
   };
+  const approveAllOrders=async ordersToApprove=>{
+    const readyOrders=ordersToApprove.filter(order=>isOrderFullyPackaged(order)&&!approvingOrderIds.includes(order.id));
+    if(readyOrders.length===0)return;
+    setIsApprovingAll(true);
+    try{for(const order of readyOrders)await approveOrder(order);}
+    finally{setIsApprovingAll(false);}
+  };
   const stopDragAutoScroll = () => {
     if (autoScrollFrameRef.current) {
       cancelAnimationFrame(autoScrollFrameRef.current);
@@ -1247,7 +1255,10 @@ const playNotificationSound=useCallback(()=>{
       >
         <div className="card-heading">
           <h1 className="section-title">{section.title}</h1>
-          <span className="order-count">{section.orders.length}</span>
+          <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+            {isSendNowSection&&<button type="button" className="approval-button" disabled={isApprovingAll||!section.orders.some(order=>isOrderFullyPackaged(order)&&!approvingOrderIds.includes(order.id))} onClick={event=>{event.stopPropagation();approveAllOrders(section.orders);}}>{isApprovingAll?"Approving...":"Approve All"}</button>}
+            <span className="order-count">{section.orders.length}</span>
+          </div>
         </div>
         {draggingProduct&&<div className="product-create-zone">＋ Drop here to create a new order</div>}
         {isBlockedSendNowTarget && (
