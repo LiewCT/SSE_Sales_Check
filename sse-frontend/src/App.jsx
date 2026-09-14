@@ -4,6 +4,7 @@ import "./App.css";
 import PwaInstallButton from "./PwaInstallButton";
 import CreditNoteReport from "./CreditNoteReport";
 import OpenInvoice from "./OpenInvoice";
+import StockRequestPage from "./StockRequestPage";
 const API_BASE_URL = "https://sse-sales-check.onrender.com";
 // const API_BASE_URL = "http://localhost:5000";
 const APPROVALS_API_URL = `${API_BASE_URL}/approvals`;
@@ -31,7 +32,7 @@ const NINE_TECH_PATTERN=/9[\s_-]*tech\b/i;
 
 const getPageFromPath=()=>{
   const path=location.hash.slice(1)||location.pathname;
-  return path==="/credit-note-report"?"credit-note-report":path==="/open-invoice"?"open-invoice":path==="/mobile-scanner"?"mobile-scanner":"packaging";
+  return path==="/credit-note-report"?"credit-note-report":path==="/open-invoice"?"open-invoice":path==="/mobile-scanner"?"mobile-scanner":path==="/stock-request"?"stock-request":"packaging";
 };
 const normalizeProductCode=value=>String(value||"").replace(/[\r\n\t]/g,"").trim().toUpperCase();
 const toQuantity=value=>Math.max(0,Number(value)||0);
@@ -464,7 +465,8 @@ function App() {
       packaging:"Packaging Queue",
       "open-invoice":"Open Invoice",
       "credit-note-report":"Credits Note Report",
-      "mobile-scanner":"Mobile Scanner"
+      "mobile-scanner":"Mobile Scanner",
+      "stock-request":"Stock Requests"
     }[currentPage]||"SSE Sales Check";
   },[currentPage]);
 
@@ -1503,6 +1505,10 @@ const playNotificationSound=useCallback(()=>{
     return <MobileScannerPage loading={loading} scanResult={scanResult} onScan={processScannedCode} onExit={()=>navigate("/",{apiBaseUrl:API_BASE_URL})}/>;
   }
 
+  if(currentPage==="stock-request"){
+    return <StockRequestPage apiBaseUrl={pageApiBaseUrl} onBack={()=>navigate("/",{apiBaseUrl:API_BASE_URL})}/>;
+  }
+
   const trashGlowAlpha=(trashProximity*0.78).toFixed(3);
   const trashGlowSoft=(trashProximity*0.34).toFixed(3);
   const trashGlowSize=`${12+Math.round(trashProximity*44)}px`;
@@ -1526,44 +1532,59 @@ const playNotificationSound=useCallback(()=>{
           <path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-.8 11H7.8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/>
         </svg>
       </div>
-      <div className="page-header">
+      <style>{`
+        .packaging-page .header-three-sections{display:grid;grid-template-columns:auto minmax(360px,1fr) auto;align-items:start;gap:16px;width:100%}
+        .packaging-page .header-left,.packaging-page .header-middle,.packaging-page .header-right{display:flex;align-items:center;gap:10px}
+        .packaging-page .header-left{flex-wrap:wrap}
+        .packaging-page .header-middle{justify-content:center;min-width:0}
+        .packaging-page .header-right{justify-content:flex-end}
+        @media(max-width:1100px){.packaging-page .header-three-sections{grid-template-columns:1fr 1fr}.packaging-page .header-middle{grid-column:1/-1;grid-row:2}.packaging-page .header-right{grid-column:2;grid-row:1}}
+        @media(max-width:700px){.packaging-page .header-three-sections{grid-template-columns:1fr}.packaging-page .header-left,.packaging-page .header-middle,.packaging-page .header-right{grid-column:1;justify-content:flex-start;flex-wrap:wrap}.packaging-page .header-left{grid-row:1}.packaging-page .header-middle{grid-row:2}.packaging-page .header-right{grid-row:3}}
+      `}</style>
+      <div className="page-header" style={{display:"block"}}>
         <div>
           <h2>Packaging Queue</h2>
           <p className="page-description">
             Click an order to expand it. Click or scan to pack; drag a product to move it.
           </p>
         </div>
-        <div className="header-actions">
-          <a href="/#/mobile-scanner" onClick={event=>handleLinkClick(event,"/mobile-scanner")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#7c3aed",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none"}}>Mobile Scan</a>
-          <div style={{display:"flex",flexDirection:"column",gap:"5px",minWidth:"280px"}}>
-            <div style={{display:"flex",gap:"6px"}}>
-              <input
-                ref={scanInputRef}
-                value={scanCode}
-                onChange={event=>setScanCode(event.target.value)}
-                onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();processScannedCode(scanCode);}}}
-                placeholder="Scan product QR code"
-                autoComplete="off"
-                inputMode="none"
-                style={{flex:1,minWidth:0,padding:"10px 12px",border:"2px solid #0f766e",borderRadius:"8px",fontWeight:"700"}}
-              />
-              <button type="button" onClick={()=>processScannedCode(scanCode)} style={{padding:"10px 14px",border:"none",borderRadius:"8px",background:"#0f766e",color:"#fff",cursor:"pointer",fontWeight:"700"}}>Scan</button>
-            </div>
-            <div style={{fontSize:"12px",fontWeight:"700",color:scanResult.type==="success"?"#15803d":scanResult.type==="error"?"#dc2626":scanResult.type==="warning"?"#b45309":scanResult.type==="saving"?"#2563eb":"#475569"}}>{scanResult.message}</div>
+        <div className="header-actions header-three-sections">
+          <div className="header-left">
+            <a href="/#/open-invoice" onClick={event=>handleLinkClick(event,"/open-invoice")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#059669",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none"}}>Open Invoice</a>
+            <a href="/#/credit-note-report" onClick={event=>handleLinkClick(event,"/credit-note-report")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#2563eb",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none"}}>Credit Note Report</a>
+            <a href="/#/stock-request" onClick={event=>handleLinkClick(event,"/stock-request")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#ea580c",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none"}}>Stock Request</a>
           </div>
-          <a href="/#/open-invoice" onClick={event=>handleLinkClick(event,"/open-invoice")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#059669",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none"}}>Open Invoice</a>
-          <a href="/#/credit-note-report" onClick={event=>handleLinkClick(event,"/credit-note-report")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#2563eb",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none"}}>Credits Note Report</a>
-
-          <PwaInstallButton />
-          <div className="live-panel">
-            <div className="live-line">
-              <span className="live-dot"></span>
-              <span>{loading ? "Connecting" : "Live"}</span>
+          <div className="header-middle">
+            <a href="/#/mobile-scanner" onClick={event=>handleLinkClick(event,"/mobile-scanner")} style={{padding:"10px 16px",border:"none",borderRadius:"8px",background:"#7c3aed",color:"#fff",cursor:"pointer",fontWeight:"700",textDecoration:"none",whiteSpace:"nowrap"}}>Mobile Scan</a>
+            <div style={{display:"flex",flexDirection:"column",gap:"5px",flex:"1 1 280px",maxWidth:"520px",minWidth:"220px"}}>
+              <div style={{display:"flex",gap:"6px"}}>
+                <input
+                  ref={scanInputRef}
+                  value={scanCode}
+                  onChange={event=>setScanCode(event.target.value)}
+                  onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();processScannedCode(scanCode);}}}
+                  placeholder="Search product QR code"
+                  autoComplete="off"
+                  inputMode="none"
+                  style={{flex:1,minWidth:0,padding:"10px 12px",border:"2px solid #0f766e",borderRadius:"8px",fontWeight:"700"}}
+                />
+                <button type="button" onClick={()=>processScannedCode(scanCode)} style={{padding:"10px 14px",border:"none",borderRadius:"8px",background:"#0f766e",color:"#fff",cursor:"pointer",fontWeight:"700"}}>Search</button>
+              </div>
+              <div style={{fontSize:"12px",fontWeight:"700",color:scanResult.type==="success"?"#15803d":scanResult.type==="error"?"#dc2626":scanResult.type==="warning"?"#b45309":scanResult.type==="saving"?"#2563eb":"#475569"}}>{scanResult.message}</div>
             </div>
-            <div className="last-updated">
-              {lastUpdated
-                ? `Updated ${lastUpdated.toLocaleTimeString()}`
-                : "Waiting for data"}
+          </div>
+          <div className="header-right">
+            <PwaInstallButton />
+            <div className="live-panel">
+              <div className="live-line">
+                <span className="live-dot"></span>
+                <span>{loading ? "Connecting" : "Live"}</span>
+              </div>
+              <div className="last-updated">
+                {lastUpdated
+                  ? `Updated ${lastUpdated.toLocaleTimeString()}`
+                  : "Waiting for data"}
+              </div>
             </div>
           </div>
         </div>

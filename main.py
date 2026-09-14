@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor,as_completed
-from datetime import datetime,timezone
+from datetime import datetime,timedelta,timezone
 import json,os,re,sqlite3,requests
 from flask import Flask,jsonify,request
 from flask_cors import CORS
@@ -13,6 +13,8 @@ DATABASE_PATH=os.environ.get("PACKAGING_DB_PATH",os.path.join(os.path.dirname(os
 REQUEST_TIMEOUT_SECONDS=30
 SSE_APPROVALS_DATATABLE_URL="https://ssegroup.com.my/api/approvals/datatables"
 SSE_CREDITS_DATATABLE_URL="https://ssegroup.com.my/api/credits/datatables"
+SSE_REQUESTS_DATATABLE_URL=os.environ.get("SSE_REQUESTS_DATATABLE_URL","https://ssegroup.com.my/api/requests/datatables")
+SSE_REQUEST_DETAIL_URL=os.environ.get("SSE_REQUEST_DETAIL_URL","https://ssegroup.com.my/api/requests")
 SSE_CREDIT_DETAIL_URL="https://ssegroup.com.my/api/credits"
 SSE_SALES_URL="https://ssegroup.com.my/api/sales"
 NINE_TECH_PATTERN=re.compile(r"\b9[\s_-]*tech\b",re.IGNORECASE)
@@ -68,6 +70,19 @@ def build_approvals_payload():
 
 def build_approved_payload(date_start="",date_end=""):
     return {"draw":"1","start":"0","length":"100","search[value]":json.dumps({"date_start":date_start,"date_end":date_end,"search":"","sale_branch":1,"sale_status":{"Pending":False,"Approved":True,"Rejected":False,"Invoiced":False,"NotInvoiced":False,"PreOrder":False,"Reserved":False},"sale_dealer":"","proforma_invoiced":False,"pro_forma_code":""}),"search[regex]":"false"}
+
+def build_request_datatable_payload(length,request_status,date_start="",date_end=""):
+    payload={"draw":"2","start":"0","length":str(length),"search[value]":json.dumps({"date_start":date_start,"date_end":date_end,"search":"","branch_id":"","request_status":{"New":request_status=="New","Approved":request_status=="Approved","Rejected":False,"Cancelled":False,"Closed":request_status=="Closed"}}),"search[regex]":"false"}
+    for index in range(9):
+        prefix=f"columns[{index}]"
+        payload.update({f"{prefix}[data]":str(index),f"{prefix}[name]":"",f"{prefix}[searchable]":"true",f"{prefix}[orderable]":"true",f"{prefix}[search][value]":"",f"{prefix}[search][regex]":"false"})
+    return payload
+
+def get_closed_request_date_range(today=None):
+    from zoneinfo import ZoneInfo
+    today=today or datetime.now(ZoneInfo("Asia/Kuala_Lumpur")).date()
+    current_sunday=today-timedelta(days=(today.weekday()+1)%7)
+    return (current_sunday-timedelta(days=7)).isoformat(),(current_sunday+timedelta(days=6)).isoformat()
 
 def build_credit_datatable_payload(length,date_start,date_end):
     payload={"draw":"5","start":"0","length":str(length),"search[value]":json.dumps({"search":"","branch_id":"1","credit_status":{"Valid":True,"Cancelled":False},"einvoice_status":{"submitted":True,"unsubmitted":True},"date_start":date_start,"date_end":date_end}),"search[regex]":"false"}
@@ -676,6 +691,45 @@ def credit_note_report():
     except Exception as error:
         app.logger.exception("Credit Note Report failed")
         return jsonify({"error":"Unable to generate the Credits Note Report.","details":str(error)}),500
+
+@app.route("/stock-requests",methods=["POST"])
+def stock_requests():
+    body=request.get_json(silent=True)
+    if not isinstance(body,dict):return jsonify({"error":"JSON body is required."}),400
+    request_status=str(body.get("status") or body.get("request_status") or "").strip().title()
+    if request_status not in("New","Approved","Closed"):return jsonify({"error":"status must be New, Approved or Closed."}),400
+    try:length=int(body.get("length",1000))
+    except(TypeError,ValueError):return jsonify({"error":"length must be a number."}),400
+    if not 1<=length<=5000:return jsonify({"error":"length must be between 1 and 5000."}),400
+    date_start,date_end=get_closed_request_date_range() if request_status=="Closed" else ("","")
+    try:
+        response=build_sse_session().post(SSE_REQUESTS_DATATABLE_URL,headers=build_sse_headers("https://ssegroup.com.my/requests"),data=build_request_datatable_payload(length,request_status,date_start,date_end),timeout=REQUEST_TIMEOUT_SECONDS)
+        data=parse_sse_json_response(response)
+        if not isinstance(data,dict):raise RuntimeError("SSE returned an invalid stock-request response.")
+        data.update({"request_status":request_status,"date_start":date_start,"date_end":date_end})
+        return jsonify(data)
+    except PermissionError as error:return jsonify({"error":str(error)}),401
+    except requests.RequestException as error:
+        app.logger.exception("SSE stock-request request failed")
+        return jsonify({"error":"Unable to retrieve stock requests from SSE.","details":str(error)}),502
+    except(RuntimeError,TypeError,ValueError,json.JSONDecodeError) as error:
+        app.logger.exception("Unexpected SSE stock-request response")
+        return jsonify({"error":"Unexpected stock-request data returned by SSE.","details":str(error)}),502
+
+@app.route("/stock-requests/<int:request_id>",methods=["GET"])
+def stock_request_detail(request_id):
+    try:
+        response=build_sse_session().get(f"{SSE_REQUEST_DETAIL_URL}/{request_id}",headers=build_sse_headers("https://ssegroup.com.my/requests"),timeout=REQUEST_TIMEOUT_SECONDS)
+        data=parse_sse_json_response(response)
+        if not isinstance(data,dict) or not isinstance(data.get("data"),dict):raise RuntimeError("SSE returned an invalid stock-request detail response.")
+        return jsonify(data)
+    except PermissionError as error:return jsonify({"error":str(error)}),401
+    except requests.RequestException as error:
+        app.logger.exception("SSE stock-request detail request failed")
+        return jsonify({"error":"Unable to retrieve stock-request details from SSE.","details":str(error)}),502
+    except(RuntimeError,TypeError,ValueError,json.JSONDecodeError) as error:
+        app.logger.exception("Unexpected SSE stock-request detail response")
+        return jsonify({"error":"Unexpected stock-request detail returned by SSE.","details":str(error)}),502
 
 @app.route("/open-invoices",methods=["POST"])
 def open_invoices():
