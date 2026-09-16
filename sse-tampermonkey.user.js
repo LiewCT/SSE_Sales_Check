@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         SSE Discount, Stock, Code & Smart Search Highlight
 // @namespace    sse-discount
-// @version      3.4
-// @description  Discount, stock warning, South City highlight, code difference, smart search highlighting, auto CASH dealer selection and 10% review cart price
+// @version      3.6
+// @description  Discount, stock warning, South City highlight, code difference, smart search highlighting, auto CASH dealer selection, review cart 10% price/total and credit refund price
 // @match        https://ssegroup.com.my/dealers/orders/new*
 // @match        https://www.ssegroup.com.my/dealers/orders/new*
+// @match        https://ssegroup.com.my/credits/create*
+// @match        https://www.ssegroup.com.my/credits/create*
 // @grant        none
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/LiewCT/SSE_Sales_Check/main/sse-tampermonkey.user.js
@@ -100,6 +102,19 @@ function addStyles(){
       font-size:16px;
       font-weight:bold
     }
+
+    #tmReviewCartDiscountTotal{
+      color:#198754;
+      font-size:18px
+    }
+
+    .tm-credit-original-price{
+      min-width:120px;
+      text-align:center;
+      color:#6c757d;
+      font-weight:bold;
+      vertical-align:middle!important
+    }
   `;
 
   document.head.appendChild(style);
@@ -138,13 +153,25 @@ async function copyPureText(value,button){
 
   const originalHTML = button.innerHTML;
 
-  button.innerHTML = '✓';
+  button.innerHTML = 'âœ“';
   button.classList.add('tm-copy-success');
 
   setTimeout(()=>{
     button.innerHTML = originalHTML;
     button.classList.remove('tm-copy-success');
   },1000);
+}
+
+function parseMoney(value){
+  const number = Number(
+    String(value)
+      .replace(/,/g,'')
+      .replace(/[^0-9.-]/g,'')
+  );
+
+  return Number.isFinite(number)
+    ? number
+    : NaN;
 }
 
 function commonPrefix(values){
@@ -691,7 +718,7 @@ function updateStock(currentQtyCell){
       )
     ){
       currentQtyCell.innerHTML =
-        '<span class="tm-no-stock">⚠ NO STOCK</span>';
+        '<span class="tm-no-stock">âš  NO STOCK</span>';
     }
 
     return;
@@ -889,7 +916,7 @@ function addDiscountHeader(table){
  * No. | Type | Branch | Code | Description |
  * Qty | 10% Off | Price | Subtotal | Action
  *
- * 10% Off = Price × 0.9
+ * 10% Off = Price Ã— 0.9
  */
 function addReviewCartDiscountHeader(){
   const tableBody =
@@ -1109,6 +1136,221 @@ function updateReviewCartDiscounts(){
   });
 }
 
+function updateReviewCartDiscountTotal(){
+  const totalElement =
+    document.querySelector(
+      '#reviewCartTotal'
+    );
+
+  if(!totalElement) return;
+
+  const total =
+    parseMoney(totalElement.textContent);
+
+  if(!Number.isFinite(total)) return;
+
+  const totalRow =
+    totalElement.closest('p');
+
+  if(!totalRow) return;
+
+  let discountRow =
+    document.querySelector(
+      '#tmReviewCartDiscountTotalRow'
+    );
+
+  if(!discountRow){
+    discountRow =
+      document.createElement('p');
+
+    discountRow.id =
+      'tmReviewCartDiscountTotalRow';
+
+    discountRow.innerHTML =
+      '<strong>10% Total: <span id="tmReviewCartDiscountTotal"></span></strong>';
+
+    totalRow.insertAdjacentElement(
+      'afterend',
+      discountRow
+    );
+  }
+
+  const valueElement =
+    discountRow.querySelector(
+      '#tmReviewCartDiscountTotal'
+    );
+
+  const discountedTotal =
+    (total * 0.9).toFixed(2);
+
+  if(
+    valueElement &&
+    valueElement.textContent !==
+      discountedTotal
+  ){
+    valueElement.textContent =
+      discountedTotal;
+  }
+}
+
+function addCreditOriginalPriceHeader(table){
+  const headerRow =
+    table?.querySelector('thead tr');
+
+  if(
+    !headerRow ||
+    headerRow.querySelector(
+      '.tm-credit-original-price-header'
+    )
+  ){
+    return;
+  }
+
+  const refundPriceHeader =
+    [...headerRow.children].find(
+      cell =>
+        cell.textContent.trim()
+          .toLowerCase() ===
+          'refund price'
+    );
+
+  if(!refundPriceHeader) return;
+
+  const header =
+    document.createElement(
+      refundPriceHeader.tagName
+        .toLowerCase()
+    );
+
+  header.className =
+    'tm-credit-original-price-header';
+
+  header.textContent =
+    'Original Price';
+
+  header.style.cssText =
+    'min-width:120px;text-align:center;white-space:nowrap';
+
+  refundPriceHeader.insertAdjacentElement(
+    'beforebegin',
+    header
+  );
+}
+
+function updateCreditRefundPrices(){
+  document
+    .querySelectorAll(
+      'input[name="refund_price"]'
+    )
+    .forEach(input=>{
+      const refundCell =
+        input.closest('td');
+
+      const row =
+        input.closest('tr');
+
+      const table =
+        input.closest('table');
+
+      if(
+        !refundCell ||
+        !row ||
+        !table
+      ){
+        return;
+      }
+
+      addCreditOriginalPriceHeader(
+        table
+      );
+
+      let originalCell =
+        row.querySelector(
+          '.tm-credit-original-price'
+        );
+
+      if(!originalCell){
+        originalCell =
+          document.createElement('td');
+
+        originalCell.className =
+          'tm-credit-original-price';
+
+        originalCell.textContent = '-';
+
+        refundCell.insertAdjacentElement(
+          'beforebegin',
+          originalCell
+        );
+      }
+
+      if(input.dataset.tmCreditHandled){
+        if(
+          input.dataset.tmCreditOriginalPrice
+        ){
+          originalCell.textContent =
+            input.dataset
+              .tmCreditOriginalPrice;
+        }
+
+        return;
+      }
+
+      const originalPrice =
+        parseMoney(input.value);
+
+      if(
+        !Number.isFinite(originalPrice) ||
+        originalPrice <= 0
+      ){
+        return;
+      }
+
+      const originalText =
+        originalPrice.toFixed(2);
+
+      const discountedPrice =
+        (originalPrice * 0.9)
+          .toFixed(2);
+
+      input.dataset.tmCreditHandled =
+        'auto';
+
+      input.dataset.tmCreditOriginalPrice =
+        originalText;
+
+      originalCell.textContent =
+        originalText;
+
+      const setter =
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value'
+        )?.set;
+
+      if(setter){
+        setter.call(
+          input,
+          discountedPrice
+        );
+      }else{
+        input.value = discountedPrice;
+      }
+
+      input.dispatchEvent(
+        new Event('input',{
+          bubbles:true
+        })
+      );
+
+      input.dispatchEvent(
+        new Event('change',{
+          bubbles:true
+        })
+      );
+    });
+}
+
 function updateTable(){
   /*
    * Automatically select CASH dealer.
@@ -1119,6 +1361,16 @@ function updateTable(){
    * Update the Review Cart table.
    */
   updateReviewCartDiscounts();
+
+  /*
+   * Update the Review Cart 10% total.
+   */
+  updateReviewCartDiscountTotal();
+
+  /*
+   * Apply the credit refund discount once.
+   */
+  updateCreditRefundPrices();
 
   const table =
     document.querySelector(
@@ -1197,6 +1449,16 @@ setInterval(
 document.addEventListener(
   'input',
   event=>{
+    if(
+      event.isTrusted &&
+      event.target?.matches?.(
+        'input[name="refund_price"]'
+      )
+    ){
+      event.target.dataset.tmCreditHandled =
+        'manual';
+    }
+
     if(
       event.target &&
       event.target.id ===
@@ -1309,5 +1571,9 @@ if(reviewCartBody){
 highlightSearchResults();
 
 updateReviewCartDiscounts();
+
+updateReviewCartDiscountTotal();
+
+updateCreditRefundPrices();
 
 })();
