@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SSE Discount, Stock, Code & Smart Search Highlight
 // @namespace    sse-discount
-// @version      3.6
+// @version      3.6.1
 // @description  Discount, stock warning, South City highlight, code difference, smart search highlighting, auto CASH dealer selection, review cart 10% price/total and credit refund price
 // @match        https://ssegroup.com.my/dealers/orders/new*
 // @match        https://www.ssegroup.com.my/dealers/orders/new*
@@ -718,7 +718,7 @@ function updateStock(currentQtyCell){
       )
     ){
       currentQtyCell.innerHTML =
-        '<span class="tm-no-stock">âš  NO STOCK</span>';
+        '<span class="tm-no-stock">⚠️ NO STOCK</span>';
     }
 
     return;
