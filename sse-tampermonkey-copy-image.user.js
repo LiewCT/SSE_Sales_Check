@@ -1,7 +1,7 @@
 // ==UserScript==
  // @name         SSE Group - Copy South City Variants as Image
  // @namespace    https://ssegroup.com.my/
- // @version      1.0.0
+ // @version      1.0.1
  // @description  Copy selected South City product variant columns as a PNG image
  // @match        https://ssegroup.com.my/dealers/orders/new*
  // @require      https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
@@ -114,8 +114,11 @@
              const branch = row.cells[0]?.textContent
                  .trim()
                  .toLowerCase();
+             const quantity = row.cells[5]?.textContent
+                 .trim()
+                 .toLowerCase();
 
-             if (branch !== 'south city') return;
+             if (branch !== 'south city' || quantity.includes('no stock')) return;
 
              matchedRows++;
 
